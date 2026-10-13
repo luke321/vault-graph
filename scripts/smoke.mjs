@@ -744,6 +744,37 @@ check("the serpentine survives, in direction and in size", async (p) => {
   return { ok: !bad.length, detail: bad.length ? bad.join("; ") + "  ||  " + detail : detail };
 }, { on: "all" });
 
+// github#202
+check("no two resting dots overlap", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function () {
+    var R = __vg.renderer, ns = [], grid = {}, cell = 24, over = [], worst = Infinity;
+    __vg.graph.forEachNode(function (id) {
+      var d = R.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      var v = R.framedGraphToViewport({ x: d.x, y: d.y });
+      var n = { id: id, x: v.x, y: v.y, r: R.scaleSize(d.size) };
+      var k = Math.floor(n.x / cell) + "," + Math.floor(n.y / cell);
+      (grid[k] || (grid[k] = [])).push(ns.length);
+      ns.push(n);
+    });
+    ns.forEach(function (a, i) {
+      var cx = Math.floor(a.x / cell), cy = Math.floor(a.y / cell);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        (grid[(cx + dx) + "," + (cy + dy)] || []).forEach(function (j) {
+          if (j <= i) return;
+          var b = ns[j], gap = Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r;
+          if (gap < worst) worst = gap;
+          if (gap < 0) over.push(a.id + "/" + b.id + " " + gap.toFixed(2) + "px");
+        });
+      }
+    });
+    return { n: ns.length, over: over, worst: worst };
+  })()`);
+  const detail = `${r.n} dots; closest pair ${r.worst.toFixed(2)} px apart edge to edge`;
+  return { ok: !r.over.length, detail: r.over.length ? `${r.over.length} pairs overlap: ${r.over.slice(0, 3).join(", ")}  ||  ${detail}` : detail };
+}, { on: "all" });
+
 check("band assignment obeys its two hard rules", async (p) => {
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {}, rows = {i: 0, o: 0};
