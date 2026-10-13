@@ -4162,6 +4162,46 @@ check("a rest taken at one stage size still bounds the dots at another", async (
   };
 }, { on: "all" });
 
+// github#171
+check("a dot is the same size against the lattice in a bigger window", async (p) => {
+  const UNITS = `(function () { var R = __vg.renderer, u = __vg.densityReport().unitPx, o = {};
+    __vg.graph.forEachNode(function (id) { var d = R.getNodeDisplayData(id);
+      if ((__vg.alpha[id] || 0) > 0.5 && d && !d.hidden) o[id] = R.scaleSize(d.size) / u; });
+    return o; })()`;
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const at = async (width, height) => {
+    await p.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: dpr, mobile: false });
+    await sleep(900);
+    await settle(p);
+    await camReset(p);
+    await p.eval(`__vg.applyLayout(false); void 0`);
+    await sleep(300);
+    return p.j(UNITS);
+  };
+  let small, big;
+  try {
+    small = await at(1700, 1100);
+    big = await at(2400, 1560);
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await sleep(600);
+    await settle(p);
+    await camReset(p);
+  }
+  const ids = Object.keys(small).filter((id) => big[id] > 0);
+  let worst = 0, off = 0;
+  for (const id of ids) {
+    const d = Math.abs(big[id] / small[id] - 1);
+    if (d > 0.01) off++;
+    if (d > worst) worst = d;
+  }
+  return {
+    ok: ids.length > 0 && off === 0,
+    detail: `stage at 1700x1100 then 2400x1560: ${off} of ${ids.length} dots change their size in ` +
+            `lattice units by more than 1% (worst ${(worst * 100).toFixed(2)}%)`,
+  };
+}, { on: "all" });
+
 // github#13
 check("the hub stays the same share of the disc as it is filtered", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);

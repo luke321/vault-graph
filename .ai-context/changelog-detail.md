@@ -1,3 +1,20 @@
+## 2026-10-13 — a dot's size no longer depends on the window (`github#171`)
+
+The dot floor (`DOT_MIN_PX`, 1.5 px) now grows with the disc's radius in pixels above
+`DOT_REF_DISC_PX` (340 px, the disc at the tuned 1584×961 harness viewport, measured 327–336 px on
+all five fixtures). Outer-row median diameter in lattice units, headless `?rest`:
+
+| fixture | window | develop 95cba48 | this |
+|---|---|---:|---:|
+| shape | 1280×800 / 1400×1000 / 1920×1080 / 2560×1440 | 0.398 / 0.353 / 0.341 / 0.309 | 0.398 / 0.356 / 0.356 / 0.356 |
+| demo | same | 0.389 / 0.332 / 0.316 / 0.273 | 0.389 / 0.336 / 0.336 / 0.336 |
+| 10k | same | 0.706 / 0.565 / 0.526 / 0.419 | 0.706 / 0.573 / 0.573 / 0.573 |
+
+`dotsize-186.mjs` (1200×1000) identical before and after on all three; goldens unchanged. New
+check *a dot is the same size against the lattice in a bigger window*: 0 of N dots over 1% on all
+five fixtures; against develop's floor it fails on all five (worst 14.9–29.5%, 9572 of 10002 dots
+on the 10k).
+
 ## 2026-10-04 — a usability audit against researched thresholds (`github#200`)
 
 Tooling and a baseline only, no product change. `scripts/usability-audit.mjs` measures the page
