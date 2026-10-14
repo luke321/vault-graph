@@ -2051,7 +2051,8 @@ check("parent tags only preserves subtag filters through the cascade", async (p)
               await new Promise(function (resolve) { requestAnimationFrame(resolve); });
             } while (__vg.demo.busy());
             peaks.push(peak);
-            same.push(__vg.parentTagsOnly === on && JSON.stringify(shown()) === JSON.stringify(expected));
+            same.push(__vg.parentTagsOnly === on && JSON.stringify(shown()) === JSON.stringify(expected) &&
+              !!document.querySelector('#vg-legend [data-row="area"] .subhid') === on);
           }
           results.push({ key: key, excluded: excluded.length, visible: expected.length, peaks: peaks, same: same });
         }

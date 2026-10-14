@@ -12,6 +12,12 @@ appearing in any sampled animation frame. The targeted parent-tag run exits 0: s
 reported green across five fixtures, including two existing no-nested-tag cases explicitly
 not asserted. The full suite was not run.
 
+With the chip on, a hidden sub-tag has no legend row of its own, so its notes went missing
+with nothing on screen saying why. The parent's row now reads "some sub-tags hidden" while
+any `hiddenSub` key under it is set and the chip is on (`subTagsHidden()`). The same headed
+regression asserts the marker is on the `area` row with the chip on and gone with it off,
+for both hidden paths; the targeted run stays 6/6 green across five fixtures.
+
 ## 2026-10-14 — sparse tags retain their own wedges (`github#119`, `github#186`, `github#202`)
 
 Reverted the tag-only pooling threshold. `SMALL_GROUP = 0` now governs both dimensions;

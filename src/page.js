@@ -7338,6 +7338,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {string} only
    * @property {string} ctTitle
    * @property {string} ct
+   * @property {string} [mark]
    */
   /**
    * github#86, design/0015 -- ONE row template for every group row the legend draws
@@ -7352,8 +7353,16 @@ function mountVaultGraph(root, data, deps) {
       '<span class="' + o.swClass + '" title="' + o.swTitle + '" style="background:' + o.swFill + '"></span>' +
       '<span class="nm" title="' + esc(o.g) + '">' + esc(o.g) + '</span>' +
       o.only +
-      '<span class="ct"' + o.ctTitle + '>' + o.ct + '</span></button>' +
+      '<span class="ct"' + o.ctTitle + '>' + (o.mark || '') + o.ct + '</span></button>' +
       '</div>';
+  }
+
+  // github#203
+  /** @param {string} g @returns {boolean} */
+  function subTagsHidden(g) {
+    if (state.dim !== "tag" || !parentTagsOnly) return false;
+    for (var k in state.hiddenSub) if (state.hiddenSub[k] && k.indexOf(g + "/") === 0) return true;
+    return false;
   }
 
   function buildLegend() {
@@ -7499,7 +7508,11 @@ function mountVaultGraph(root, data, deps) {
                              : '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>')
                    : '<span class="only none" aria-hidden="true"></span>',
         // github#50, github#78
-        ctTitle: ctTitle, ct: w.inert ? String(w.counts[g]) : countText(g) });
+        ctTitle: ctTitle, ct: w.inert ? String(w.counts[g]) : countText(g),
+        // github#203
+        mark: !w.inert && vis && subTagsHidden(g)
+          ? '<span class="subhid" title="Some sub-tags of ' + esc(g) +
+            ' are hidden. Turn off Parent tags only to show them.">some sub-tags hidden</span>' : '' });
 
       if (open && vis && !w.inert) {
         var subs = subOrder[g];
