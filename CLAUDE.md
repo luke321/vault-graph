@@ -30,6 +30,7 @@ imported below; if you are a contributor, its absence is normal and nothing here
   animation endpoint caps still apply. Groups hidden in settings contribute no members or links
   to that baseline; temporary legend and date filters retain its locked rings.
 - **Only depth-1 subfolders with their own tint slot are pushed**; a sub-wedge earns a slot only if it can fill one.
+- **Sparse top-level folders and tags keep their own wedges.** Improve readability through dot sizing; never auto-pool their sparsity away.
 - **The page is scoped**: every CSS rule under `.vault-graph`, every id through `$()`; nothing shipped reaches the network.
 - **The layout matches its golden snapshot** on all five fixtures — never regenerate a golden to make a check pass.
 

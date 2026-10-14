@@ -557,29 +557,23 @@ options that remain.
 
 ### The real cause is the band split — fixed in github#117, in two halves
 
-### In the tag dimension, tags of three notes or fewer share one wedge (github#119, github#186)
+### Sparse tags and folders keep separate wedges (github#119, github#186, github#202)
 
-`SMALL_TAG_GROUP = 4` turns the dormant merge path on for the **tag dimension only**:
-a tag holding fewer than four notes lays out inside the one `MERGED` wedge instead of its own.
-`SMALL_GROUP` stays 0, so folders never merge, and `(unlinked)` and `(untagged)` are never
-pooled. It is layout-only, as the colour section above measured: the tag keeps its legend
-row, its colour and its place in the order; only its wedge, and the seams around it, go.
-Chosen by the maintainer on 2026-10-09 after the switch clips showed the dominant-folder
-vault's inner ring drawn in specks. Measured there, tags at rest: inner dots **1.30 -> 3.27 px**
-median (outer 4.03 -> 3.85), the first inner note's room 23 -> 130 units against a 135-unit
-pitch. The folder disc and every golden are unchanged (the goldens are taken in the folder
-dimension). A switch keeps the rings it was locked with (design/0015), so straight after a
-folders-to-tags switch the inner dots read 2.86 px against 3.27 after a relayout; before the
-merge the same gap was 1.26 against 1.30.
+`SMALL_GROUP = 0` applies in both dimensions. A tag with one, two or three notes keeps its
+own wedge, colour and legend row. Sparse usage is information the disc must expose, so it
+must not combine unrelated small tags to make them look denser. The dot-sizing changes in
+github#171 and github#202 provide readability without hiding this structure.
 
-The pooled wedge is pinned to the inner ring with the groups under `PIN_BELOW` (github#117): its tags sat there in 2.9.0, and left to the balancer the pool, now one large cell, took the outer ring and pushed the big groups in. Measured against the 2.9.0 release on the dominant-folder vault in tags (same fixture, 1600x1000, DPR 1, after a reload): unpinned, 208 notes in 94 groups changed ring and the outer ring went from 5 wedges to 91 groups; pinned, **no group changes ring**, the outer ring's clockwise order and the 16 named inner wedges' order equal 2.9.0's, and only the 100 pooled tags gather into one wedge. Inner dots there 1.34 -> 3.0 px median. The other nine fixture/dimension pairs move a median 0.4-2.6 px (at most 11 px) with dot radii within about 0.2 px of 2.9.0.
+The tag-only threshold of four introduced during github#186 is reverted on 2026-10-14.
+It combined 100 tags (137 notes) into one inner wedge in the dominant-folder fixture,
+reducing its 116 inner wedges to 17. Those tags must once again occupy their own wedges.
+The dormant merge path remains disabled, as it already was for folders.
 
-Every original tag in the pooled cell inherits that cell's locked band, including when a
-previous band assignment is retained. Sizing, hub clearance, band colours and legend labels
-must agree with the planner. `tags: pooled rings and interrupted defaults retain note identity`
-checks a four-note inner pool at rest, after a hard relayout and under a temporary filter.
-It also interrupts a dimension switch through the visibility-default setting: no stand-ins
-may survive the resulting hard relayout, and all surviving notes must be their original nodes.
+`tags: small tags keep separate wedges and interrupted defaults retain note identity`
+checks tags of one, two and three notes at rest, after a hard relayout and under a temporary
+filter. It asserts three correctly named inner wedges with no mixed-tag cell. It also
+interrupts a dimension switch through the visibility-default setting: no stand-ins may
+survive the resulting hard relayout, and all surviving notes must be their original nodes.
 
 Neither github#107 change touched why the inner lattice was tighter in the first place.
 `balanceBands()` optimised ring **thickness** — its cost was `|inner − BAND_RATIO · outer|`,

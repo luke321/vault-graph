@@ -29,7 +29,7 @@ export async function groupingRegressionCheck(p) {
       nodes: Array.from({length: 100}, (_, i) => ({
         id: (i < 80 ? 'F' : 'G') + '/Note-' + i + '.md', label: 'Note ' + i,
         folder: i < 80 ? 'F' : 'G', sub: '', dirs: [], type: 'note',
-        tags: [i < 60 ? 'big' : i < 96 ? 'medium' : i < 98 ? 'tiny-a' : 'tiny-b'],
+        tags: [i < 60 ? 'big' : i < 94 ? 'medium' : i < 95 ? 'tiny-a' : i < 97 ? 'tiny-b' : 'tiny-c'],
         created: '2026-09-01', touched: '2026-09-01', words: 20, deg: 2
       })),
       edges: Array.from({length: 100}, (_, i) => ({s: i, t: (i + 1) % 100, w: 1})),
@@ -41,16 +41,18 @@ export async function groupingRegressionCheck(p) {
     const rings = () => {
       const plan = __vg.buildWedgePlan(true, id => __vg.alpha[id] || 0);
       let pooled = 0, wrong = 0, inner = 0;
+      const wedges = {};
       plan.cells.forEach(c => {
         const tiny = c.list.filter(id => __vg.groupOf(id).startsWith('tiny-'));
-        if (new Set(tiny.map(id => __vg.groupOf(id))).size < 2) return;
-        pooled += tiny.length;
+        if (!tiny.length) return;
+        if (new Set(c.list.map(id => __vg.groupOf(id))).size > 1) pooled += tiny.length;
+        wedges[c.g] = (wedges[c.g] || 0) + tiny.length;
         if (c.inner) inner += tiny.length;
         tiny.forEach(id => {
           if (__vg.isInner(id) !== c.inner || __vg.dotWhy(id).band !== (c.inner ? 'i' : 'o')) wrong++;
         });
       });
-      return {pooled, inner, wrong};
+      return {pooled, inner, wrong, wedges};
     };
     try {
       await mount(data, prefs);
@@ -77,7 +79,9 @@ export async function groupingRegressionCheck(p) {
         if (__vg.visible(id)) after.visible++;
         if (!a.dupOf && (__vg.alpha[id] || 0) > .99) after.originals++;
       });
-      return {ok: [cold, retaken, filtered].every(r => r.pooled === 4 && r.inner === 4 && r.wrong === 0) &&
+      return {ok: [cold, retaken, filtered].every(r => r.pooled === 0 && r.inner === 6 && r.wrong === 0 &&
+        Object.keys(r.wedges).length === 3 && r.wedges['tiny-a'] === 1 &&
+        r.wedges['tiny-b'] === 2 && r.wedges['tiny-c'] === 3) &&
         started && copiesBefore === 100 && after.nodes === 100 && after.copies === 0 &&
         !after.fold && after.visible === 80 && after.originals === 80,
         detail: JSON.stringify({cold, retaken, filtered, started, copiesBefore, after})};

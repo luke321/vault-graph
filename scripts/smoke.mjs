@@ -935,7 +935,7 @@ async (p) => {
   };
 }, { on: "all" });
 
-check("tags: pooled rings and interrupted defaults retain note identity", groupingRegressionCheck, { clock: "real" });
+check("tags: small tags keep separate wedges and interrupted defaults retain note identity", groupingRegressionCheck, { clock: "real" });
 
 check("tags: every note is filed in exactly one wedge, in either dimension", async (p) => {
   const r = await p.j(`(function(){

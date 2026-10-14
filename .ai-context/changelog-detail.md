@@ -1,3 +1,21 @@
+## 2026-10-14 — sparse tags retain their own wedges (`github#119`, `github#186`, `github#202`)
+
+Reverted the tag-only pooling threshold. `SMALL_GROUP = 0` now governs both dimensions;
+top-level tags of one, two and three notes remain separate, so sparse usage is visible.
+The dot-sizing rules from github#171 and github#202 and the animation rework are retained.
+
+The regression check first failed with six notes combined into one cell. After the change,
+it finds three named wedges of one, two and three notes at rest, after relayout and under a
+filter; interrupting a dimension switch still retires all temporary stand-ins correctly.
+On the dominant-folder fixture, the 100 small tags (137 notes) once again have 100 wedges:
+the inner ring returns from 17 cells to 116. All five fixtures have no mixed-tag cells.
+
+Validation: the targeted browser run exited 0, including dimension-switch landing and
+parallel Refresh checks. Its five golden checks could not identify the branch-labelled
+display names, so they were verified separately by fixture identity: all five snapshots
+retain their bands and positions (maximum drift below 0.0071 units, tolerance 0.1), without
+regenerating any golden. Lint/type checks and the comment ratchet pass.
+
 ## 2026-10-13 — a typical dot uses more of its room (`github#202`)
 
 There are three parts. The ramp is curved: `DOT_RAMP_CURVE = 0.5`, so a dot sits at `dotRamp^0.5`,
