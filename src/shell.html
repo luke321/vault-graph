@@ -100,6 +100,9 @@ mountVaultGraph(
     // github#164 -- absent means off, which is the order the disc has always drawn
     rootInOrder: loadSettings().rootInOrder === true,
     onRootInOrder: function (v) { saveSettings({ rootInOrder: v }); },
+    // github#203 -- absent means off, today's tag view
+    parentTagsOnly: loadSettings().parentTagsOnly === true,
+    onParentTagsOnly: function (v) { saveSettings({ parentTagsOnly: v }); },
     // github#165 -- left UNDEFINED when nobody has chosen, so the page falls back to
     // VAULT_DATA.dev: a build made with --dev opens with the developer menu already armed,
     // and once the reader has flipped it here localStorage is what remembers.
