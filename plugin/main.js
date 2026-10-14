@@ -74,6 +74,7 @@ function bareMap() {
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} rootInOrder                      github#164
+ * @property {boolean} parentTagsOnly                   github#203
  * @property {boolean} devTools                        github#165
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
@@ -650,6 +651,13 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.rootInOrder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#203
+      parentTagsOnly: this.plugin.settings.parentTagsOnly === true,
+      /** @param {boolean} v */
+      onParentTagsOnly: async (v) => {
+        this.plugin.settings.parentTagsOnly = !!v;
+        await this.plugin.saveSettings();
+      },
       // github#165
       devTools: this.plugin.settings.devTools === true,
       /** @param {boolean} v */
@@ -762,6 +770,8 @@ const DEFAULTS = {
   countBars: true,
   // github#164 -- off is the order the disc has always drawn
   rootInOrder: false,
+  // github#203 -- off is today's tag view
+  parentTagsOnly: false,
   // github#165 -- off; the disc's right-click stays the host's
   devTools: false,
   // github#41, design/0011
@@ -1480,6 +1490,8 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCountBars) api.setCountBars(this.settings.countBars !== false);
     // github#164
     if (api.setRootInOrder) api.setRootInOrder(this.settings.rootInOrder === true);
+    // github#203
+    if (api.setParentTagsOnly) api.setParentTagsOnly(this.settings.parentTagsOnly === true);
     // github#165
     if (api.setDevTools) api.setDevTools(this.settings.devTools === true);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);

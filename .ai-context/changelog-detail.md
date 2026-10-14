@@ -16,6 +16,22 @@ display names, so they were verified separately by fixture identity: all five sn
 retain their bands and positions (maximum drift below 0.0071 units, tolerance 0.1), without
 regenerating any golden. Lint/type checks and the comment ratchet pass.
 
+## 2026-10-14 — a Parent tags only chip in the tag view (`github#203`)
+
+`fileSub()` and `fileDirs()` are the only two places the tag dimension hands out sub-wedges.
+With the chip on, both answer nothing. Measured headless at 1568×866 on the tag and demo fixtures,
+switching the dimension and then the chip:
+
+| fixture | groups | groups with sub-wedges | sub-wedges, off | sub-wedges, on | rings kept | plan parity |
+|---|---|---|---|---|---|---|
+| tag | 15 | 2 | 6 | 0 | yes | OK |
+| demo | 14 | 2 | 6 | 0 | yes | OK |
+
+Off restores 6. The dominant-folder and sortspec fixtures have no nested tags, so the check
+answers `NOT ASSERTED` there. The goldens pass on all five fixtures, unchanged. The first version
+re-packed with a fresh geometry and moved the tag fixture's rings; the setter now takes the
+locked rings through `hardRelayout(false, true)`.
+
 ## 2026-10-13 — a typical dot uses more of its room (`github#202`)
 
 There are three parts. The ramp is curved: `DOT_RAMP_CURVE = 0.5`, so a dot sits at `dotRamp^0.5`,

@@ -132,6 +132,8 @@
  * @property {boolean} [countBars]              github#78, design/0006
  * @property {boolean} [rootInOrder]            github#164 -- off is today's order
  * @property {(v: boolean) => void} [onRootInOrder]  github#164
+ * @property {boolean} [parentTagsOnly]         github#203 -- off is today's tag view
+ * @property {(v: boolean) => void} [onParentTagsOnly]  github#203
  * @property {boolean} [devTools]               github#165 -- absent means "follow DATA.dev"
  * @property {(v: boolean) => void} [onDevTools]     github#165
  * @property {"folder" | "tag"} [dim]         github#86, design/0015 -- absent means "folder"
@@ -220,6 +222,7 @@
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
  * @property {(v: boolean) => void} setCountBars
  * @property {(v: boolean) => void} setRootInOrder                github#164
+ * @property {(v: boolean) => void} setParentTagsOnly             github#203
  * @property {(v: boolean) => void} setDevTools                   github#165
  * @property {(v: boolean) => boolean} setWedgeGrid               github#165
  * @property {(v: number) => number} setTimeScale                 github#165
@@ -737,6 +740,9 @@ function mountVaultGraph(root, data, deps) {
   // github#164 -- OFF is today's disc, so nothing moves until a reader asks
   var rootInOrder = deps.rootInOrder === true;
   var onRootInOrder = typeof deps.onRootInOrder === "function" ? deps.onRootInOrder : null;
+  // github#203 -- OFF is today's tag view
+  var parentTagsOnly = deps.parentTagsOnly === true;
+  var onParentTagsOnly = typeof deps.onParentTagsOnly === "function" ? deps.onParentTagsOnly : null;
   // github#164 -- the name the root group SORTS as: its first note
   var rootKey = "";
   var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
@@ -1207,6 +1213,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @param {NodeAttrs} [a] @returns {string} */
   function fileSub(id, a) {
     if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).sub || "";
+    if (parentTagsOnly) return "";
     var f = tagFiling[id];
     return f ? f.sub : "";
   }
@@ -1214,6 +1221,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
   function fileDirs(id, a) {
     if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).dirs || [];
+    if (parentTagsOnly) return [];
     var f = tagFiling[id];
     return f ? f.dirs : [];
   }
@@ -8102,6 +8110,12 @@ function mountVaultGraph(root, data, deps) {
       var b = /** @type {HTMLElement} */ (btns[i]);
       b.setAttribute("aria-pressed", b.getAttribute("data-dim") === state.dim ? "true" : "false");
     }
+    // github#203 -- the chip belongs to the tag view only
+    var chip = $("parents");
+    if (chip) {
+      chip.hidden = state.dim !== "tag";
+      chip.setAttribute("aria-pressed", parentTagsOnly ? "true" : "false");
+    }
   }
 
   function buildTools() {
@@ -8114,6 +8128,8 @@ function mountVaultGraph(root, data, deps) {
       if (t) setDim(t.getAttribute("data-dim") || "folder", true);
     });
     syncDimUI();
+    // github#203
+    if ($("parents")) $("parents").onclick = function () { setParentTagsOnly(!parentTagsOnly, true); };
 
     // github#131, design/0019 -- the two readings
     if ($("tabgroups")) $("tabgroups").onclick = function () { setReading("groups"); };
@@ -9353,6 +9369,32 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onRootInOrder) onRootInOrder(rootInOrder);
     return rootInOrder;
+  }
+
+  // github#203
+  /** @param {boolean} on @param {boolean} [persist] @param {boolean} [instant] */
+  function setParentTagsOnly(on, persist, instant) {
+    var next = !!on;
+    if (next === parentTagsOnly) return parentTagsOnly;
+    parentTagsOnly = next;
+    syncDimUI();
+    if (state.dim === "tag") {
+      var walk = !!(renderer && !instant && geomLock);
+      var rings = geomLock;
+      buildSubOrder();
+      if (walk) hardRelayout(false, true);
+      else {
+        hardRelayout(false, false);
+        keepRings(rings);
+        applyLayout(false);
+        applyLayout(false);
+      }
+      attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+      if (refreshSettingsPanel) refreshSettingsPanel();
+    }
+    if (persist && onParentTagsOnly) onParentTagsOnly(parentTagsOnly);
+    if (walk) cascade(null, { colToggle: true });
+    return parentTagsOnly;
   }
 
   // github#78, design/0006
@@ -11800,6 +11842,8 @@ function mountVaultGraph(root, data, deps) {
                     setCountBars: function (v) { return setCountBars(v !== false, false); },
                     // github#164 -- instant, like setFolderOrder: the host is not watching
                     setRootInOrder: /** @param {boolean} v */ function (v) { return setRootInOrder(v, false, true); },
+                    // github#203
+                    setParentTagsOnly: /** @param {boolean} v */ function (v) { return setParentTagsOnly(v === true, false, true); },
                     // github#165
                     setDevTools: /** @param {boolean} v */ function (v) { return setDevTools(v === true, false); },
                     setWedgeGrid: /** @param {boolean} v */ function (v) { return wedgeDebug(v === true); },
@@ -12121,6 +12165,7 @@ function mountVaultGraph(root, data, deps) {
                     get unlinkedTintByFolder() { return unlinkedTintByFolder; },
                     get countBars() { return countBars; },
                     get rootInOrder() { return rootInOrder; },
+                    get parentTagsOnly() { return parentTagsOnly; },
                     get rootKey() { return rootKey; },
                     get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     get subTailRank() { return SUB_SLOTS - 1; },

@@ -1971,6 +1971,57 @@ check("the vault root sorts with the folders, and keeps its colour there", async
                           : "every automatic slot unchanged")
   };
 }, { on: "all" });   // github#164 -- every fixture that has a root group
+check("parent tags only leaves no sub-wedge, keeps the rings, and off is today's tag view", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    __vg.setParentTagsOnly(false);
+    __vg.setDim("tag");
+    var rd = function(){
+      var gs = __vg.groupsOf("tag"), subs = 0;
+      gs.forEach(function(g){ subs += g.subs.filter(function(s){ return s.name; }).length; });
+      var L = __vg.geomLock;
+      return { subs: subs, order: __vg.groupOrder().join("|"), rings: L ? [L.r0, L.rOuter, L.maxR] : null,
+               parity: __vg.checkPlanParity().parityOK };
+    };
+    var off = rd();
+    __vg.setParentTagsOnly(true);  var on = rd();
+    __vg.setParentTagsOnly(false); var back = rd();
+    __vg.setDim("folder");
+    return { off: off, on: on, back: back, chip: document.getElementById("vg-parents").hidden };
+  })()`);
+  if (r.off.subs === 0) return { ok: true, detail: "NOT ASSERTED: this vault's tag view has no sub-wedges to remove" };
+  const sameRings = JSON.stringify(r.on.rings) === JSON.stringify(r.off.rings);
+  const restored = r.back.subs === r.off.subs && r.back.order === r.off.order &&
+                   JSON.stringify(r.back.rings) === JSON.stringify(r.off.rings);
+  const walkRead = `(function(){
+    var gs = __vg.groupsOf("tag"), subs = 0;
+    gs.forEach(function(g){ subs += g.subs.filter(function(s){ return s.name; }).length; });
+    var L = __vg.geomLock;
+    return { subs: subs, rings: L ? [L.r0, L.rOuter, L.maxR] : null, parity: __vg.checkPlanParity().parityOK,
+             pressed: document.getElementById("vg-parents").getAttribute("aria-pressed") };
+  })()`;
+  await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
+  await settle(p);
+  const w0 = await p.j(walkRead);
+  await p.eval(`document.getElementById("vg-parents").click(); void 0`);
+  await settle(p);
+  const w1 = await p.j(walkRead);
+  await p.eval(`document.getElementById("vg-parents").click(); void 0`);
+  await settle(p);
+  const w2 = await p.j(walkRead);
+  await p.j(`(function(){ __vg.setDim("folder"); return true; })()`);
+  const walked = w1.subs === 0 && w1.pressed === "true" && w1.parity === true &&
+                 JSON.stringify(w1.rings) === JSON.stringify(w0.rings) &&
+                 w2.subs === w0.subs && JSON.stringify(w2.rings) === JSON.stringify(w0.rings);
+  return {
+    ok: r.on.subs === 0 && r.on.order === r.off.order && sameRings && restored &&
+        r.on.parity === true && r.chip === true && walked,
+    detail: `sub-wedges ${r.off.subs} -> ${r.on.subs} -> ${r.back.subs}; same groups in the same order ` +
+            `${r.on.order === r.off.order}; rings kept ${sameRings}; off restores today's view ${restored}; ` +
+            `plan parity ${r.on.parity}; chip hidden in the folder view ${r.chip}; ` +
+            `on the cascade: sub-wedges ${w0.subs} -> ${w1.subs} -> ${w2.subs}, rings kept ${walked}`
+  };
+}, { on: "all", leaves: ["state.hidden", "vg.geomLock", "store.settings"] });   // github#203
 
 /* ------------------------------------------------- github#86 D-9, design/0015 */
 

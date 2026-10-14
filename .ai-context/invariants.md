@@ -7383,3 +7383,21 @@ and skips both `finally` and `exit` handlers.
 - it removes an untagged dir, or a live pid's, only once it is a day old;
 - it leaves anything without the prefix;
 - a stop file runs a registered teardown and exits with its code.
+
+## Parent tags only leaves no sub-wedge and keeps the rings (github#203)
+
+**`Parent tags only` is a chip in the legend header, shown in the tag view only, off by default.**
+On, `fileSub()` answers no sub and `fileDirs()` no deeper dirs in the tag dimension, so no
+parent tag has a sub-wedge, a sub-tint or a pushed sub-wedge. The folder view never reads the flag.
+
+**The rings are the ones it was switched into.** The toggle re-packs inside the locked rings, as a
+dimension switch does: the cascade ends on the resting layout with no jump, and `geomLock`
+(`r0`, `rOuter`, `maxR`) is the same before, on and after off.
+
+**Off is today's tag view**: the same groups in the same order, the same sub-wedges, the same
+rings. The goldens do not move, because the setting starts off.
+
+The check `parent tags only leaves no sub-wedge, keeps the rings, and off is today's tag view`
+reads it on every fixture: sub-wedges, the group order, the rings and plan parity, with the
+setter and with the chip's own click through the cascade. A vault with no nested tags answers
+`NOT ASSERTED`. It leaves `state.hidden`, `vg.geomLock` and `store.settings` off baseline by design.
