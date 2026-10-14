@@ -3119,6 +3119,11 @@ function mountVaultGraph(root, data, deps) {
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
         // github#186, decisions/0017
+        // github#202
+        if (cellMin < Infinity && fitCap &&
+            c.slots.filter(function (sl) { return present(sl.id); }).length <= FEW_IN_CELL) {
+          cellMin = Math.max(cellMin, pitchUnits(isInner ? "i" : "o"));
+        }
         if (cellMin < Infinity) c.slots.forEach(function (sl) {
           if (present(sl.id)) cellRoomNext[sl.id] = cellMin;
         });
@@ -5801,7 +5806,7 @@ function mountVaultGraph(root, data, deps) {
   function takeRest(id, a) {
     var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
     t = t > 1 ? 1 : t < 0 ? 0 : t;
-    restT[id] = t;
+    restT[id] = t = Math.pow(t, DOT_RAMP_CURVE);
     var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, floorPx());
     restHiU[id] = hi / pxPerUnit;
     if (v < lo + (hi - lo) * t - 1e-9) restCapU[id] = v / pxPerUnit; else delete restCapU[id];
@@ -6357,6 +6362,9 @@ function mountVaultGraph(root, data, deps) {
   }
   // github#186
   var DOT_GROW_MAX = 3;
+  // github#202
+  var DOT_RAMP_CURVE = 0.5;
+  var FEW_IN_CELL = 3;
   var DOT_COUNT_GAIN = 0.7, DOT_COUNT_MAX_PX = 7.5;
   /** @type {number | null} */
   var dotMeasureRatio = null;
@@ -6468,6 +6476,8 @@ function mountVaultGraph(root, data, deps) {
     var u = DOT_OVER_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD * DOT_OVER_PITCH);
     if (mine !== undefined && mine > 0 && mine * DOT_CLEAR < u) u = mine * DOT_CLEAR;
     var hi = DOT_OF_PITCH * u * pxPerUnit;
+    // github#202
+    if (isIn && geomLock) hi = Math.min(hi, HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT * pxPerUnit);
     lastDotHi = hi;
     // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
     var cameraRatio = dotMeasureRatio !== null ? dotMeasureRatio : renderer ? renderer.getCamera().getState().ratio || 1 : 1;
@@ -6476,7 +6486,7 @@ function mountVaultGraph(root, data, deps) {
     var lo = Math.min(hi, camLo);
     lastDotLo = lo;
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
-    var v = lo + (hi - lo) * (id !== undefined ? dotRamp(id) : 1);
+    var v = lo + (hi - lo) * (id !== undefined ? Math.pow(dotRamp(id), DOT_RAMP_CURVE) : 1);
     if (v < lo) v = lo;
     // github#186 -- the rest was taken at ratio 1; its floor share follows
     var rest = id !== undefined && !restTaking && restHiU[id] !== undefined

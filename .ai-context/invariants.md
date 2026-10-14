@@ -409,6 +409,40 @@ which the issue proposed. It only reaches dots whose ceiling is above ~6.4 px; o
 the 10k the ceiling sits near the floor, so 1920×1080 was untouched and the 10k did not move at
 all, which is exactly the shape of vault the report came from.
 
+### The ramp is curved, so a typical dot uses its room (github#202)
+
+> Asserted by *no two resting dots overlap* (all five fixtures). Measured in
+> `investigations/202/`, with the alternatives that were not built.
+
+Most notes carry few links, so a linear ramp left the median note at ramp 0.41: on four of the five
+fixtures that is 0.50–0.65 of its row's cap. **`DOT_RAMP_CURVE = 0.5`** takes the square root of
+the ramp position. The order by links is kept, since the curve is monotone and continuous, so
+nothing steps, and the median lands at 0.70–0.77 of the cap. `takeRest` curves `restT` the same
+way. That is what keeps *a settled dot is the size a fresh relayout gives it*: `restAt` and the
+floor-share term in `dotPx` both read `restT`.
+
+**An inner-ring dot's ceiling never exceeds the hub row-0 cap.** Row 0 holds a ring's most-linked
+notes, and `HUB_ROW0_FRAC` caps them. Before the curve, that cap already bound on the sortspec
+fixture without inverting anything. Under the curve, the notes behind row 0 grew past it, and the
+ring's link-rank correlation fell from 0.94 to −0.13. Capping the ceiling instead of the dot keeps
+the ring ordered (1.00). The cost is that this ring draws smaller than it did (median 5.18 → 4.24
+px), which is accepted.
+
+**A cell of `FEW_IN_CELL = 3` notes or fewer is sized against the row's pitch, not its own
+step**, and only while *Size dots from the frame* is on. `ringsLayout` records that cell's room as
+the pitch, so the walking cascade interpolates it like any other room. A first cut decided this in
+`dotPx` from a cached group count, which went stale while notes faded, because `alpha` is mutated
+in place. A 1–3 note wedge's own step is about half
+the pitch, so its dots sat near the floor: on demo 1.62 px against a ring median of 2.39. The frame
+clearance (`FIT_SHARE` × nearest neighbour) is what keeps a grown dot off its neighbours, which is
+why this is conditional on it. Lifting the cell clamp for every dot was measured and rejected:
+ceilings tripled, and the 10k got 12,260 near-touching pairs. Inside such a wedge the edge cap can
+then order dots by slot rather than by links (4 of 4 pairs on demo and the 10k). That is accepted:
+it only changes size, and nothing overlaps.
+
+The suite's serpentine check does not see either cost. It reads cells of six notes or more, and
+the sortspec inversion left 81% of notes in an ordered cell, above its 65% bar.
+
 ### What the two together moved
 
 Dots paired by identical link weight across the bands — the question github#107 actually asked:

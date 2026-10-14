@@ -1,3 +1,33 @@
+## 2026-10-13 — a typical dot uses more of its room (`github#202`)
+
+There are three parts. The ramp is curved: `DOT_RAMP_CURVE = 0.5`, so a dot sits at `dotRamp^0.5`,
+and the resting ramp `restT` is curved the same way. An inner-ring dot's ceiling is held at or
+under the hub row-0 cap. With *Size dots from the frame* on, a cell of `FEW_IN_CELL = 3` notes or
+fewer takes its row's pitch as its room instead of its own step. All of it measured with `investigations/202/measure-202.mjs`: headless 1584×961 `?rest`,
+median dot over its own cap, outer / inner ring.
+
+| fixture | develop c118bad | this |
+|---|---|---|
+| demo | 0.62 / 0.65 | 0.77 / 0.78 |
+| 10k | 0.88 / 1.00 | 0.93 / 1.00 |
+| shape | 0.59 / 0.55 | 0.75 / 0.73 |
+| tag | 0.58 / 0.54 | 0.75 / 0.72 |
+| spec | 0.50 / 0.45 | 0.70 / 0.70 |
+
+**Overlapping dot pairs: 0 on all five, before and after**, and none come within 0.5 px. The new
+check *no two resting dots overlap* asserts it.
+
+Costs:
+- Outer-ring link-rank correlation (Spearman) on demo goes from 0.92 to 0.83.
+- The top/bottom decile ratio goes from 1.76 to 1.44.
+- Same-wedge inversions go from 0.037 to 0.080 on demo and from 0.029 to 0.067 on spec.
+- The 1–3 note wedges on demo and the 10k invert by slot, 4 of 4 pairs each, because the edge
+  cap binds once they grow.
+- The spec inner ring's median goes from 5.18 to **4.24 px**, smaller than develop, because its
+  ceiling is now the hub row-0 cap (6.05 px). Without that guard the ring inverts: correlation
+  −0.13, against 1.00 with it.
+- Positions, bands and the five goldens are unchanged.
+
 ## 2026-10-13 — a dot's size no longer depends on the window (`github#171`)
 
 The dot floor (`DOT_MIN_PX`, 1.5 px) now grows with the disc's radius in pixels above
