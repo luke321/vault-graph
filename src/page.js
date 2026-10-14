@@ -1220,8 +1220,12 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
   function fileDirs(id, a) {
+    return state.dim === "tag" && parentTagsOnly ? [] : noteDirs(id, a);
+  }
+
+  /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
+  function noteDirs(id, a) {
     if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).dirs || [];
-    if (parentTagsOnly) return [];
     var f = tagFiling[id];
     return f ? f.dirs : [];
   }
@@ -5916,7 +5920,7 @@ function mountVaultGraph(root, data, deps) {
     var a = graph.getNodeAttributes(id);
     if (isHidden(fileGroup(id, a))) return false;
     if (isHidden(groupOf(id))) return false;
-    var d = fileDirs(id, a);
+    var d = noteDirs(id, a);
     if (!d.length) {
       if (state.hiddenSub[fileGroup(id, a) + "/"]) return false;
     } else {

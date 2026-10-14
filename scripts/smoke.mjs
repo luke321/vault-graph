@@ -2023,6 +2023,49 @@ check("parent tags only leaves no sub-wedge, keeps the rings, and off is today's
   };
 }, { on: "all", leaves: ["state.hidden", "vg.geomLock", "store.settings"] });   // github#203
 
+// github#203
+check("parent tags only preserves subtag filters through the cascade", async (p) => {
+  const storedWas = await storeSnap(p);
+  await settle(p);
+  try {
+    const r = await p.j(`(async function () {
+      __vg.setParentTagsOnly(false); __vg.setDim("tag");
+      var saved = Object.assign({}, __vg.state.hiddenSub), scale = __vg.timeScale, results = [];
+      __vg.timeScale = 0.1;
+      var shown = function () { return __vg.graph.nodes().filter(function (id) {
+        return (__vg.alpha[id] || 0) > 0.004;
+      }).sort(); };
+      try {
+        for (var key of ["area/health", "area/health/sleep"]) {
+          __vg.state.hiddenSub = Object.assign({}, saved); __vg.relayout();
+          var before = shown();
+          __vg.state.hiddenSub[key] = true; __vg.relayout();
+          var expected = shown(), excluded = before.filter(function (id) { return expected.indexOf(id) < 0; });
+          var peaks = [], same = [];
+          for (var on of [true, false]) {
+            document.getElementById("vg-parents").click();
+            var peak = 0, limit = performance.now() + 15000;
+            do {
+              peak = Math.max(peak, excluded.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length);
+              if (performance.now() > limit) throw Error("Parent tag filter cascade did not settle");
+              await new Promise(function (resolve) { requestAnimationFrame(resolve); });
+            } while (__vg.demo.busy());
+            peaks.push(peak);
+            same.push(__vg.parentTagsOnly === on && JSON.stringify(shown()) === JSON.stringify(expected));
+          }
+          results.push({ key: key, excluded: excluded.length, visible: expected.length, peaks: peaks, same: same });
+        }
+        return results;
+      } finally {
+        __vg.setParentTagsOnly(false); __vg.state.hiddenSub = saved;
+        __vg.relayout(); __vg.setDim("folder"); __vg.timeScale = scale;
+      }
+    })()`);
+    return { ok: r.every(x => x.excluded > 0 && x.visible > 0 && x.peaks.every(n => n === 0) && x.same.every(Boolean)),
+             detail: JSON.stringify(r) };
+  } finally { await settle(p); await storeBack(p, storedWas); }
+}, { on: ["tag-vault"], clock: "real", leaves: ["state.hidden", "vg.geomLock"] });
+
 /* ------------------------------------------------- github#86 D-9, design/0015 */
 
 check("a marked heatmap day haloes but never pushes", async (p) => {

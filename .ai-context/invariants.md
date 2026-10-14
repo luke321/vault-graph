@@ -7390,6 +7390,12 @@ and skips both `finally` and `exit` handlers.
 On, `fileSub()` answers no sub and `fileDirs()` no deeper dirs in the tag dimension, so no
 parent tag has a sub-wedge, a sub-tint or a pushed sub-wedge. The folder view never reads the flag.
 
+**Subtag filters retain their original paths.** `noteDirs()` keeps the full filing for visibility,
+while `fileDirs()` flattens only the display. The check `parent tags only preserves subtag filters
+through the cascade` hides `area/health` and `area/health/sleep` on the tag fixture and clicks the
+chip on and off. The same notes must remain visible at both endpoints, and no excluded note may
+appear during either animation.
+
 **The rings are the ones it was switched into.** The toggle re-packs inside the locked rings, as a
 dimension switch does: the cascade ends on the resting layout with no jump, and `geomLock`
 (`r0`, `rOuter`, `maxR`) is the same before, on and after off.

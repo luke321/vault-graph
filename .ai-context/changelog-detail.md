@@ -1,3 +1,17 @@
+## 2026-10-14 — parent-tag display preserves subtag filters (`github#203`)
+
+The Parent tags only chip flattened the path used by both layout and visibility. Hiding
+`area/health` on the tag fixture excluded 99 notes, but enabling the chip brought all 99
+back; hiding `area/health/sleep` similarly brought 21 back. Switching the chip off hid them
+again. `noteDirs()` now preserves the original hierarchy for visibility, while `fileDirs()`
+continues to flatten the display hierarchy.
+
+The new headed regression first failed for both paths. After the fix, the visible sets stay
+at 792 and 870 notes respectively through both toggle directions, with zero excluded notes
+appearing in any sampled animation frame. The targeted parent-tag run exits 0: six checks
+reported green across five fixtures, including two existing no-nested-tag cases explicitly
+not asserted. The full suite was not run.
+
 ## 2026-10-14 — sparse tags retain their own wedges (`github#119`, `github#186`, `github#202`)
 
 Reverted the tag-only pooling threshold. `SMALL_GROUP = 0` now governs both dimensions;

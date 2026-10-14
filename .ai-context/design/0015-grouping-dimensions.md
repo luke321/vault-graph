@@ -497,6 +497,13 @@ force. The departure folds from the positions captured at the switch, and each f
 own disc's notes. The clock-hand fallback is unchanged. Filmed: the demo's middle keeps 54% of
 the resting colour (was 24%), the tag vault's 48% (was 18%); the numbers are in `invariants.md`.
 
+## Parent-tag display and filtering (github#203)
+
+The Parent tags only chip flattens layout paths, not filter paths. `fileDirs()` supplies
+the flattened display hierarchy; `noteDirs()` retains the original folder or tag hierarchy
+for `visible()`. Hiding a subtag, including a deeper descendant, therefore keeps the same
+notes excluded when the chip is toggled in either direction.
+
 ## Verify
 
 ```javascript
