@@ -15,10 +15,10 @@
   beside the CHANGELOG entry; a PATCH leaves it as it is, and shows nothing.
   scripts/build-plugin.mjs refuses a file that breaks any of that.
 -->
-# 2.9.0
-- On a phone the panel now sits below the disc in the page's own scroll, instead of covering the circle.
-- Panning is off on a phone -- the disc doesn't drift under your thumb -- and buttons throughout are sized for a finger.
-- A new Folder order setting lays wedges and the legend out the way your vault's own file explorer already sorts them.
-- Root notes take their place among the folders instead of always sitting first or last.
-- The heatmap band's own controls fit their row on a phone instead of spilling out of it.
-> vg-gear
+# 2.10.0
+- The layout engine under the disc was rebuilt to make room for what comes next; most views look just as they did.
+- A typical dot now draws at about the size its space allows, and it scales with the disc when you resize the window.
+- A filtered band fills the ring it owns, and a long tail of small tags or folders keeps its own wedges without drowning in gaps.
+- In the tag view, a new Parent tags chip folds every parent tag into one solid wedge.
+- Walking from note to note frames the whole visible neighbourhood in one camera move.
+> vg-parents

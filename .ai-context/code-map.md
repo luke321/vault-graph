@@ -4,7 +4,7 @@
 declarations of the files too large to read top to bottom, with line numbers. Open the
 range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 
-## `src/page.js` — 12720 lines, 38 sections, 531 functions
+## `src/page.js` — 12730 lines, 38 sections, 531 functions
 
 ### Sections
 
@@ -42,12 +42,12 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 9549–10132 | heatmap |
 | 10133–10136 | demo |
 | 10137–10785 | date range |
-| 10786–11553 | demo automation + debug API — stripped from the plugin build |
-| 11554–11555 | date range (continued) |
-| 11556–11772 | live rebuild |
-| 11773–12106 | go |
-| 12107–12649 | demo automation + debug API — stripped from the plugin build |
-| 12650–12720 | go (continued) |
+| 10786–11563 | demo automation + debug API — stripped from the plugin build |
+| 11564–11565 | date range (continued) |
+| 11566–11782 | live rebuild |
+| 11783–12116 | go |
+| 12117–12659 | demo automation + debug API — stripped from the plugin build |
+| 12660–12730 | go (continued) |
 
 ### Functions
 
@@ -554,36 +554,36 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 11082 | `demoRibbonPoint` |
 | 11099 | `demoWhere` |
 | 11118 | `demoMode` |
-| 11429 | `demoFullStoryboard` |
-| 11444 | `demoLive` |
-| 11500 | `demoArrivalRect` |
-| 11513 | `demoAct` |
-| 11576 | `dragOwnsFrames` |
-| 11581 | `liveBusy` |
-| 11583 | `liveWhy` |
-| 11589 | `placeKeyOf` |
-| 11600 | `linkWeights` |
-| 11621 | `diffData` |
-| 11640 | · `missing` |
-| 11656 | `applyData` |
-| 11752 | `setWords` |
-| 11759 | `drainLive` |
-| 11767 | `stopDrain` |
-| 11891 | · · · · · · · · · · `rows` |
-| 11919 | · · · · · · · · · · `sample` |
-| 11932 | · · · · · · · · · · `at` |
-| 11940 | · · · · · · · · · · `dist` |
-| 12017 | · · · · · · · · · · `r3` |
-| 12018 | · · · · · · · · · · `r3n` |
-| 12020 | · · · · · · · · · · `bandStat` |
-| 12045 | · · · · · · · · · · · `q` |
-| 12228 | · · · · · · · · · · `take` |
-| 12237 | · · · · · · · · · · `r2` |
-| 12303 | · · · · · · · · · · `W` |
-| 12311 | · · · · · · · · · · `rows` |
-| 12361 | · · · · · · · · · · `r3` |
-| 12496 | · · · · · · · · · · `byPath` |
-| 12688 | `destroy` |
+| 11439 | `demoFullStoryboard` |
+| 11454 | `demoLive` |
+| 11510 | `demoArrivalRect` |
+| 11523 | `demoAct` |
+| 11586 | `dragOwnsFrames` |
+| 11591 | `liveBusy` |
+| 11593 | `liveWhy` |
+| 11599 | `placeKeyOf` |
+| 11610 | `linkWeights` |
+| 11631 | `diffData` |
+| 11650 | · `missing` |
+| 11666 | `applyData` |
+| 11762 | `setWords` |
+| 11769 | `drainLive` |
+| 11777 | `stopDrain` |
+| 11901 | · · · · · · · · · · `rows` |
+| 11929 | · · · · · · · · · · `sample` |
+| 11942 | · · · · · · · · · · `at` |
+| 11950 | · · · · · · · · · · `dist` |
+| 12027 | · · · · · · · · · · `r3` |
+| 12028 | · · · · · · · · · · `r3n` |
+| 12030 | · · · · · · · · · · `bandStat` |
+| 12055 | · · · · · · · · · · · `q` |
+| 12238 | · · · · · · · · · · `take` |
+| 12247 | · · · · · · · · · · `r2` |
+| 12313 | · · · · · · · · · · `W` |
+| 12321 | · · · · · · · · · · `rows` |
+| 12371 | · · · · · · · · · · `r3` |
+| 12506 | · · · · · · · · · · `byPath` |
+| 12698 | `destroy` |
 
 ## `scripts/smoke.mjs` — 9887 lines, 13 sections, 99 functions, 179 checks
 

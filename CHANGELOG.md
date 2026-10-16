@@ -30,6 +30,48 @@ published tag breaks every link to it.
 
 ---
 
+## 2.10.0 — "Groundwork" — 2026-10-16
+
+**The layout engine underneath the disc was rebuilt to make room for what comes next, dots now
+use the room they are given, and the tag view can show just your top-level tags.**
+
+### A reworked layout engine
+
+- The engine that packs your notes into rings and wedges was rewritten from the ground up. It is
+  groundwork: the features coming next need it, and most views look almost exactly as they did
+  in 2.9.0.
+- A filtered or drilled-in band now fills the ring it owns, instead of stopping short of it.
+- A long tail of small folders or tags no longer spends a third of the inner ring on the gaps
+  between them, and every one of them keeps its own wedge.
+- Walking from note to note frames the whole visible neighbourhood in one camera move; in a
+  square window it used to push most of the links off screen.
+
+### Dots that use their room
+
+- A typical dot now draws at about the size its space allows, instead of about half of it.
+- A dot's size follows the disc, not the window: resize the window and the dots scale with the
+  picture instead of changing shape against it.
+- Resting dots never overlap.
+- The colour picker's preview grew with them, so it still shows the sizes the disc really draws.
+
+### Parent tags only
+
+- A new **Parent tags** chip beside All and None in the tag view folds every parent tag into
+  one solid wedge: no sub-tag slivers, no sub-tag tints.
+- It is remembered like the other view settings, in the plugin and in the standalone page.
+- Sub-tags you have hidden stay hidden while it is on, and the parent's legend row says
+  *some sub-tags hidden* so the missing notes are never a mystery.
+
+### Smaller things
+
+- The plugin and the exporter now build their data against one shared, checked contract, so the
+  two can no longer drift apart.
+- The test suite can run without a window, and run either half of itself on its own.
+- Screen and lock handling for the test tools moved out of the repository behind an optional
+  hook; a fresh clone runs without it.
+- A usability audit measures the page's mouse and touch targets and the legibility of its dots
+  and text against researched thresholds.
+
 ## 2.9.0 — "Mobile & Sort" — 2026-09-19
 
 **A phone finally gets a layout built for it instead of the desktop's borrowed one, and the disc

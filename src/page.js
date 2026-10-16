@@ -11134,6 +11134,16 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["dim", "folder"], act: "tags", why: "and back to folders" },
       { settle: true, act: "tags", why: "the same swap the other way round" },
 
+      // github#203
+      { click: true, target: ["dim", "tag"], act: "parenttags", why: "cut the disc by tag" },
+      { settle: true, act: "parenttags", why: "let the tag disc land" },
+      { click: true, target: ["id", "parents"], act: "parenttags", why: "Parent tags: every parent tag folds into one solid wedge" },
+      { settle: true, act: "parenttags", why: "the sub-tag slivers merge into their parents" },
+      { click: true, target: ["id", "parents"], act: "parenttags", why: "...and the sub-tags come back" },
+      { settle: true, act: "parenttags", why: "let the sub-wedges return" },
+      { click: true, target: ["dim", "folder"], act: "parenttags", why: "back to folders" },
+      { settle: true, act: "parenttags", why: "leave the folder disc" },
+
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
@@ -11423,7 +11433,7 @@ function mountVaultGraph(root, data, deps) {
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
   // github#72, design/0014
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile", "sort"];
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile", "sort", "parenttags"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
