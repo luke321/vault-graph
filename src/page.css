@@ -345,11 +345,11 @@
   }
   /* github#77, design/0004 */
   .vault-graph .swatch {
-    width: 50px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
+    width: 50px; height: 54px; padding: 0; cursor: pointer; border-radius: 5px;
     border: 1px solid var(--border); line-height: 0; flex: 0 0 auto;
   }
   .vault-graph .swatch .prev {
-    width: 48px; height: 40px; display: block; border-radius: 4px;
+    width: 48px; height: 52px; display: block; border-radius: 4px;
   }
   .vault-graph .swatch .gnd { fill: var(--surface-1); }
   .vault-graph .swatch .d  { fill: var(--dot); }

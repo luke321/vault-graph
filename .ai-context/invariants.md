@@ -6044,7 +6044,11 @@ being the ones the disc draws, which is the only thing the preview is claiming.
 
 ### The quartet is a reference scale, not a bound
 
-`PREVIEW_R_PX` is `[0.35, 0.65, 1.38, 2.19, 4.06]`, a **reference scale, not a bound**. A radius
+`PREVIEW_R_PX` is `[0.35, 0.8, 1.6, 3.0, 5.4]`, a **reference scale, not a bound**. It was
+`[0.35, 0.65, 1.38, 2.19, 4.06]` until 2026-10-16: github#171 made a dot scale with the disc and
+github#202 let a typical dot fill its room, and the demo median went from 1.47 px to 3.35 px at
+the tuned 1584x961 and 5.28 px in the 2544x1353 window the harness placed, outside 4.06. The
+pre-push suite on `5640517` failed the resemblance criterion below on exactly that. A radius
 falls out of the vault's size and the viewport's together, and the three fixtures span 0.39 to
 5.93 px, so no fixed set of numbers can bracket every disc. The first cut of the check asserted
 every live dot fell inside the scale and **failed on the 10k fixture at 0.42 px** -- the
@@ -6060,11 +6064,17 @@ Two criteria, both asserted on every fixture:
 1. **Coverage** -- the smallest previewed radius is no larger than the smallest the disc draws.
 2. **Resemblance** -- the previewed range brackets the disc's median dot.
 
-| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside 0.35-4.06 |
+| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside the scale |
 |---|---|---|---|---|
-| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes |
-| 10k synthetic | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes |
-| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes | yes |
+| demo (1403 notes), before github#171 | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes, 0.35-4.06 |
+| 10k synthetic, before github#171 | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes, 0.35-4.06 |
+| dominant-folder, before github#171 | 954 | 1.38 / **2.10** / 3.07 px | yes | yes, 0.35-4.06 |
+| demo, 1584x961 (headless), 2026-10-16 | 1403 | 2.24 / **3.35** / 4.84 px | yes | yes, 0.35-5.4 |
+| demo, 2544x1353 (harness window), 2026-10-16 | 1403 | 3.50 / **5.28** / 7.67 px | yes | yes, 0.35-5.4 |
+
+The check asserts on the demo fixture only, in whatever window the harness places, so the
+resemblance criterion now depends on that window: a dot scales with the disc. 5.4 px brackets
+the median up to the 2544x1353 window measured here; a larger one can fail it again.
 
 Doubling or halving dot size breaks the second; drawing anything under 0.35 px breaks the first.
 
@@ -6123,7 +6133,8 @@ Coverage now runs at both, and in the plugin as well:
 **The chip has to be big enough to read, and 34 px was not.** Twenty dots in a 32x40 drawing
 leaves about 2.4 px between them and nothing reads at a glance. The drawing is **48x40** and the
 chip **50x42**, giving roughly 5 px of gap, which is what lets the 0.35 px sample read as a
-smudge beside an 8 px dot rather than as noise. Measured before changing anything, because the
+smudge beside an 8 px dot rather than as noise. Since 2026-10-16 the drawing is **48x52** and
+the chip **50x54**: four 13 px rows hold the 5.4 px top sample with about 2 px between rows. Measured before changing anything, because the
 obvious guess was wrong: Obsidian's `setting-item-control` is a fixed **369 px at both a 1600 px
 and a 900 px window**, and the chip measured exactly 34x42 in both. They were never compressed,
 only small. The cost is height -- four per line instead of six, three lines instead of two, and

@@ -1,3 +1,15 @@
+## 2026-10-16 — the picker's preview keeps up with the larger dots (`github#77`, `github#171`, `github#202`)
+
+The pre-push suite on `5640517` went 548/549: "the picker draws the disc's own dot sizes" saw
+the demo disc draw 3.01 / **4.54** / 6.59 px against a preview scale topping out at 4.06 px. The
+check alone, in the 2544x1353 window the harness placed, measured 3.50 / **5.28** / 7.67 px; a
+fresh page at the tuned 1584x961 measured 2.24 / **3.35** / 4.84 px and passed. Before github#171
+and github#202 the demo median was 1.47 px.
+
+`PREVIEW_R_PX` is now `[0.35, 0.8, 1.6, 3.0, 5.4]` and the drawing 48x52 (chip 50x54), four 13 px
+rows. The same check now reads "median inside 0.35-5.4" at 5.28 px; all seven picker checks pass
+headed on the demo fixture.
+
 ## 2026-10-14 — parent-tag display preserves subtag filters (`github#203`)
 
 The Parent tags only chip flattened the path used by both layout and visibility. Hiding

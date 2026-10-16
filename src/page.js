@@ -6404,9 +6404,9 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#77, design/0013
-  var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
+  var PREVIEW_R_PX = [0.35, 0.8, 1.6, 3.0, 5.4];
   var PREVIEW_W = 48;
-  var PREVIEW_H = 40;
+  var PREVIEW_H = 52;
   var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
   var PREVIEW_CX = (function () {
     var i, wide = 0;
