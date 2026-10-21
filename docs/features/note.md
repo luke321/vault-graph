@@ -29,4 +29,4 @@ Commit `assets/features/note.webp` and update `Last re-recorded` below in the sa
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `2.9.0 — 2026-09-19` — 6.2 s at 1000x1000, encoded at 1000 px (0.86 MB) |
+| **Last re-recorded** | `2.10.0 — 2026-10-21` — 6.2 s at 1000x1000, encoded at 1000 px (0.93 MB) |
