@@ -2,19 +2,31 @@
 import { attach, json } from "./cdp.mjs";
 // github#146
 import { makeErrorLog, runChecks } from "./smoke-runner.mjs";
+// github#151
+import { couplingReport, leakReport } from "./smoke-state.mjs";
 // github#142
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
+import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
+import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
+import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
+import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
+import { countSizingCheck } from "./check-count-sizing.mjs";
+import { groupingRegressionCheck } from "./check-grouping-regressions.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
-import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { harnessScreen, leftWindowPos } from "./screen.mjs";
+import { admission, claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { exited, interrupted, onInterrupt, reapStale, removeDir, runDir } from "./interrupt.mjs";
+// github#155
+import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
+         wantsHeadless } from "./smoke-shape.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
-         DEFAULT_JOBS, fixtureStore, record as recordPass, shapeDeltas,
-         startRun } from "./suite-stamp.mjs";
+         DEFAULT_JOBS, fixtureDigest, fixtureStore, record as recordPass, shapeDeltas,
+         stampFixture, startRun } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, dirname, basename } from "node:path";
@@ -34,9 +46,19 @@ const argAll = (n) => {
 // github#7
 const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
 // github#129
+// github#151 -- the state audit, off unless a file is named for it
+const AUDIT = arg("audit-state", "");
+// github#151 -- the state boundary
+const BOUNDARY = !argv.includes("--no-state-boundary");
 const HEADED = argv.includes("--headed");
-// github#87
-const NO_LOCK = argv.includes("--no-lock");
+// github#155, decisions/0016 -- no window, no screen lock; --headed beats it
+const HEADLESS = wantsHeadless({ argv, env: process.env });
+// github#113, github#155 -- all (the default), fast, or walk
+// github#155 -- the file's own voice for a bad argument, not a stack trace
+const LANE = (() => {
+  try { return parseLane(arg("lane", "all")); }
+  catch (e) { console.error("smoke failed to run: " + e.message); process.exit(1); }
+})();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function freePorts(k) {
@@ -87,7 +109,13 @@ const check = (name, fn, opts) => {
   if (on !== "all" && !(Array.isArray(on) && on.length && on.every((f) => FIXTURE_NAMES.includes(f)))) {
     throw new Error(`check "${name}": on must be "all" or a non-empty list of ${FIXTURE_NAMES.join(", ")}`);
   }
-  all.push({ name, fn, on, clock: (opts && opts.clock) === "real" ? "real" : "fast" });
+  // github#151 -- what this check may leave off baseline, if anything
+  const leaves = (opts && opts.leaves) || undefined;
+  if (leaves !== undefined &&
+      !(Array.isArray(leaves) && leaves.length && leaves.every((k) => typeof k === "string" && k))) {
+    throw new Error(`check "${name}": leaves must be a non-empty list of state keys`);
+  }
+  all.push({ name, fn, on, clock: (opts && opts.clock) === "real" ? "real" : "fast", leaves });
 };
 const runsOn = (c, fixture) => !fixture || c.on === "all" || c.on.indexOf(fixture.name) >= 0;
 
@@ -98,21 +126,28 @@ const needsIntro = (c) => NEEDS_INTRO.some((q) => c.name.toLowerCase().includes(
 // github#79
 const NEEDS_PRISTINE = ["the overview is absent at rest"];
 const needsPristine = (c) => NEEDS_PRISTINE.some((q) => c.name.toLowerCase().includes(q));
-const selected = () => (ONLY.length
+// github#113, github#155 -- --only picks by name, --lane by the clock
+const selected = () => pickLane(ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
-  : all);
+  : all, LANE);
 
 // github#110, github#113, github#92
 const JOBS = Math.max(1, Number(arg("jobs", String(DEFAULT_JOBS))) || DEFAULT_JOBS);
+// github#101
+const SERIAL_JOBS = Math.max(1, Number(arg("serial-jobs", "1")) || 1);
+// github#101
+const WIDTH = Math.max(JOBS, SERIAL_JOBS);
 
-const GRID = argv.includes("--no-grid") ? false
+// github#155 -- no screen to divide, and a constant viewport beats the grid
+const GRID = HEADLESS ? false
+          : argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
-          : JOBS > 1;
+          : WIDTH > 1;
 
 let SCREEN = null;
 
 function gridSlot(i, k) {
-  if (!SCREEN) SCREEN = leftmostScreen();
+  if (!SCREEN) SCREEN = harnessScreen();
   const cols = Math.ceil(Math.sqrt(Math.max(1, k)));
   const rows = Math.ceil(Math.max(1, k) / cols);
   const w = Math.floor(SCREEN.w / cols), h = Math.floor(SCREEN.h / rows);
@@ -127,8 +162,19 @@ check("page loads with no console errors", async (p, ctx) => {
 }, { on: "all" });
 
 check("__vg is present and the intro landed", async (p) => {
-  const r = await p.j(`{hasVg: !!window.__vg, until: __vg.state.until, notes: __vg.graph.order}`);
-  return { ok: r.hasVg && r.until === null, detail: `${r.notes} notes, until=${r.until}` };
+  // github#139
+  const r = await p.j(`(function () {
+    var lc = window.__vg ? __vg.lastCascade() : null;
+    return { hasVg: !!window.__vg, until: window.__vg ? __vg.state.until : undefined,
+             notes: window.__vg ? __vg.graph.order : -1,
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "" };
+  })()`);
+  const animated = r.path === "animated" && r.exit === "converged";
+  return {
+    ok: r.hasVg && r.until === null && animated,
+    detail: `${r.notes} notes, until=${r.until}; intro cascade ${r.path || "?"}, ${r.frames} frames, ` +
+            `exit ${r.exit || "?"}` + (animated ? "" : "  <- THE LOAD INTRO DID NOT ANIMATE"),
+  };
 });
 
 // github#96
@@ -262,7 +308,8 @@ check("nav counts share one right edge", async (p) => {
   return { ok, detail: `folded ${folded.n} counts / ${folded.distinct.length} edge, ` +
                        `open ${open.n} counts / ${open.distinct.length} edge` +
                        (open.n > folded.n ? "" : "  <- the tree never opened") };
-});
+  // github#151 -- measuring every row expands every folder
+}, { leaves: ["state.collapsed", "press.vg-legend"] });
 
 check("every heatmap day with notes fills its cell", async (p) => {
   const r = await p.j(`(function(){
@@ -339,6 +386,9 @@ check("the heatmap band is painted for the state it landed in", async (p) => {
   await clickEye(p, g);
   await settle(p);
   const BAR = 2;
+  // github#151 -- hiding and filtering crops the disc; the overview lights
+  await settle(p);
+  await toRest(p);
   return { ok: r.max <= BAR,
            detail: `hid ${g}: ${r.lit} of ${r.days} days lit; the band as painted vs repainted from its own state differs ` +
                    `in ${r.px} px (max ${r.max}/255, bar ${BAR}) of ${r.w}x${r.h}` };
@@ -509,6 +559,222 @@ check("the resting disc is on the lattice", async (p) => {
   return { ok, detail };
 }, { on: "all" });
 
+// github#186
+check("no lit note is outside its band's static rails", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function () {
+    var gl = __vg.geomLock;
+    if (!gl) return null;
+    var UNIT = 160, INNER_SCALE = 0.8, INNER_FILL = 0.8;
+    var rails = { i: { row0: gl.r0 * INNER_SCALE * UNIT,
+                       top: (gl.r0 + (gl.rOuter - gl.r0) * INNER_FILL) * INNER_SCALE * UNIT },
+                  o: { row0: gl.rOuter * UNIT, top: gl.maxR * UNIT } };
+    var out = { i: { n: 0, lo: Infinity, hi: 0, worst: null }, o: { n: 0, lo: Infinity, hi: 0, worst: null } };
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+      var k = __vg.isInner(id) ? "i" : "o";
+      var b = out[k], rr = Math.hypot(a.x, a.y);
+      b.n++;
+      if (rr < b.lo) b.lo = rr;
+      if (rr > b.hi) b.hi = rr;
+      var over = Math.max(rails[k].row0 - rr, rr - rails[k].top);
+      if (!b.worst || over > b.worst.over) b.worst = { id: id, r: rr, over: over };
+    });
+    ["i", "o"].forEach(function (k) { if (out[k].lo === Infinity) out[k].lo = 0; });
+    return { rails: rails, bands: out };
+  })()`);
+  if (!r) return { ok: true, detail: "NOT ASSERTED: no geometry lock on this page" };
+  // github#186
+  const TOL = 0.5;
+  const parts = [], bad = [];
+  for (const k of ["i", "o"]) {
+    const b = r.bands[k], rail = r.rails[k];
+    if (!b.n) { parts.push(`${k} empty`); continue; }
+    const under = rail.row0 - b.lo, over = b.hi - rail.top;
+    if (under > TOL) bad.push(`${k} reaches ${b.lo.toFixed(1)}, inside its row-0 rail ${rail.row0.toFixed(1)} by ${under.toFixed(1)}`);
+    if (over > TOL) bad.push(`${k} reaches ${b.hi.toFixed(1)}, past its top rail ${rail.top.toFixed(1)} by ${over.toFixed(1)}`);
+    parts.push(`${k} ${b.n} notes over ${b.lo.toFixed(0)}..${b.hi.toFixed(0)} in ${rail.row0.toFixed(0)}..${rail.top.toFixed(0)}`);
+  }
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") : parts.join("; ") };
+}, { on: "all" });
+
+// github#186
+check("a resting wedge fills the arc its notes can", async (p) => {
+  await settle(p);
+  await p.eval("__vg.wedgeDebug(true); void 0").catch(() => {});
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var UNIT = 160;
+    var edges = __vg.wedgeEdges() || [];
+    if (!edges.length) return null;
+    var pos = {};
+    __vg.graph.forEachNode(function (id, a) { pos[id] = { r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x) }; });
+    var dotOf = function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      return d && !d.hidden ? __vg.renderer.scaleSize(d.size) : 0;
+    };
+    var q0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var q1 = __vg.renderer.graphToViewport({ x: UNIT, y: 0 });
+    var perPx = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+    perPx = perPx > 1e-3 ? UNIT / perPx : 0;
+    var ang = function (a, b) { var d = b - a; while (d < 0) d += 360; while (d >= 360) d -= 360; return d; };
+    var out = [];
+    edges.forEach(function (w) {
+      if (w.nStart == null || !(w.drawn > 0.2)) return;
+      var mine = [];
+      __vg.graph.forEachNode(function (id) {
+        if (__vg.groupOf(id) !== w.g) return;
+        if ((__vg.alpha[id] || 0) < 0.999) return;
+        if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+        if ((__vg.isInner(id) ? "i" : "o") !== w.band) return;
+        mine.push(id);
+      });
+      if (!mine.length) return;
+      // the RIM row is what draws the wedge's angular extent
+      var rim = 0;
+      mine.forEach(function (id) { if (pos[id].r > rim) rim = pos[id].r; });
+      var row = mine.filter(function (id) { return Math.abs(pos[id].r - rim) < 1; });
+      var n = row.length, dot = 0;
+      row.forEach(function (id) { var d = dotOf(id) * perPx; if (d > dot) dot = d; });
+      var arcLen = (w.drawn * Math.PI / 180) * rim;
+      if (!(arcLen > 1e-6)) return;
+      // n notes spread across the arc reach (n-1)/n of it, plus their own two half-dots
+      var allow = Math.min(1, (n > 1 ? (n - 1) / n : 0) + 2 * dot / arcLen);
+      out.push({ g: w.g, band: w.band, n: n, drawn: w.drawn,
+                 cover: Math.min(1, ang(w.nEnd, w.nStart) / w.drawn), allow: allow, dot: dot, rim: rim });
+    });
+    return { wedges: out };
+  })()`);
+  await p.eval("__vg.wedgeDebug(false); void 0").catch(() => {});
+  if (!r || !r.wedges.length) {
+    return { ok: true, detail: "NOT ASSERTED: the wedge overlay recorded no cells on this page" };
+  }
+  const SLACK = 0.9;
+  const short = r.wedges.filter((w) => w.cover < w.allow * SLACK)
+                        .sort((a, b) => a.cover / a.allow - b.cover / b.allow);
+  const worst = r.wedges.slice().sort((a, b) => a.cover / a.allow - b.cover / b.allow)[0];
+  const detail = `${r.wedges.length} resting wedges; tightest ${worst.g} (${worst.band}, ${worst.n} in its rim row, ` +
+    `${worst.drawn.toFixed(1)} deg): covers ${worst.cover.toFixed(2)} of the ${worst.allow.toFixed(2)} its notes allow` +
+    (short.length ? `; ${short.length} under ${SLACK}x: ` +
+      short.slice(0, 3).map((w) => `${w.g} ${w.cover.toFixed(2)}/${w.allow.toFixed(2)}`).join(", ") : "");
+  return { ok: !short.length, detail };
+}, { on: "all" });
+
+// github#186, decisions/0017 -- the snake is only visible as its size gradient
+check("the serpentine survives, in direction and in size", async (p) => {
+  await settle(p);
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var G = __vg.graph, R = __vg.renderer;
+    var plan = __vg.buildWedgePlan(true, function (id) { return __vg.alpha[id] || 0; });
+    var cells = [];
+    plan.cells.forEach(function (c) {
+      if (c.list.length < 6) return;
+      var rows = {}, seq = [];
+      c.list.forEach(function (id, rank) {
+        var a = G.getNodeAttributes(id), d = R.getNodeDisplayData(id);
+        if (!a || !d || d.hidden) return;
+        var sw = Math.PI / 2 - Math.atan2(a.y, a.x);
+        while (sw < 0) sw += 2 * Math.PI;
+        var sl = c.slots.find(function (s) { return s.id === id; });
+        var rec = { rank: rank, row: sl ? sl.row : -1, sw: sw, px: R.scaleSize(d.size) };
+        seq.push(rec);
+        (rows[rec.row] || (rows[rec.row] = [])).push(rec);
+      });
+      if (seq.length < 6) return;
+      var dirs = [];
+      Object.keys(rows).map(Number).sort(function (x, y) { return x - y; }).forEach(function (rw) {
+        var L = rows[rw];
+        if (L.length < 2) { dirs.push(0); return; }
+        var up = 0, down = 0;
+        for (var i = 1; i < L.length; i++) {
+          var d0 = L[i].sw - L[i - 1].sw;
+          if (d0 > Math.PI) d0 -= 2 * Math.PI;
+          if (d0 < -Math.PI) d0 += 2 * Math.PI;
+          if (d0 > 1e-6) up++; else if (d0 < -1e-6) down++;
+        }
+        dirs.push(up > down ? 1 : down > up ? -1 : 0);
+      });
+      var alt = 0, pairs = 0;
+      for (var k = 1; k < dirs.length; k++) {
+        if (dirs[k] && dirs[k - 1]) { pairs++; if (dirs[k] !== dirs[k - 1]) alt++; }
+      }
+      var conc = 0, disc = 0;
+      for (var i2 = 0; i2 < seq.length; i2++) {
+        for (var j = i2 + 1; j < seq.length; j++) {
+          var dp = seq[j].px - seq[i2].px;
+          if (dp < -1e-6) conc++; else if (dp > 1e-6) disc++;
+        }
+      }
+      cells.push({ g: c.g, k: c.k, band: c.inner ? "i" : "o", n: seq.length,
+                   alt: alt, pairs: pairs,
+                   tau: (conc + disc) ? (conc - disc) / (conc + disc) : 0,
+                   flat: !(conc + disc) });
+    });
+    return { cells: cells };
+  })()`);
+  if (!r || !r.cells.length) {
+    return { ok: true, detail: "NOT ASSERTED: no cell on this page holds six notes" };
+  }
+  const cs = r.cells;
+  const notes = cs.reduce((a, c) => a + c.n, 0);
+  const pairs = cs.reduce((a, c) => a + c.pairs, 0);
+  const alt = cs.reduce((a, c) => a + c.alt, 0);
+  const spread = [];
+  for (const c of cs) for (let i = 0; i < c.n; i++) spread.push(c.tau);
+  spread.sort((a, b) => a - b);
+  const wmed = spread[Math.floor(spread.length / 2)];
+  const good = cs.filter((c) => c.tau >= 0.9).reduce((a, c) => a + c.n, 0);
+  const share = good / notes;
+  const bad = [];
+  if (alt < pairs) {
+    const off = cs.filter((c) => c.alt < c.pairs).slice(0, 3)
+                  .map((c) => `${c.g} ${c.band} ${c.alt}/${c.pairs}`).join(", ");
+    bad.push(`${pairs - alt} of ${pairs} adjacent row pairs run the same way: ${off}`);
+  }
+  if (wmed < 0.9) bad.push(`the note-weighted median cell reads tau ${wmed.toFixed(2)}, under 0.90`);
+  if (share < 0.65) bad.push(`only ${(share * 100).toFixed(0)}% of notes sit in a cell with tau >= 0.9, under 65%`);
+  const flat = cs.filter((c) => c.flat).reduce((a, c) => a + c.n, 0);
+  const detail = `${cs.length} cells of 6+ notes (${notes} notes); direction alternates ${alt}/${pairs}; ` +
+    `size falls along rank at tau ${wmed.toFixed(2)} note-weighted, ${(share * 100).toFixed(0)}% of notes in a cell at 0.90+` +
+    (flat ? `; ${flat} notes draw one size (the pixel floor)` : "");
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") + "  ||  " + detail : detail };
+}, { on: "all" });
+
+// github#202
+check("no two resting dots overlap", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function () {
+    var R = __vg.renderer, ns = [], grid = {}, cell = 24, over = [], worst = Infinity;
+    __vg.graph.forEachNode(function (id) {
+      var d = R.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      var v = R.framedGraphToViewport({ x: d.x, y: d.y });
+      var n = { id: id, x: v.x, y: v.y, r: R.scaleSize(d.size) };
+      var k = Math.floor(n.x / cell) + "," + Math.floor(n.y / cell);
+      (grid[k] || (grid[k] = [])).push(ns.length);
+      ns.push(n);
+    });
+    ns.forEach(function (a, i) {
+      var cx = Math.floor(a.x / cell), cy = Math.floor(a.y / cell);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        (grid[(cx + dx) + "," + (cy + dy)] || []).forEach(function (j) {
+          if (j <= i) return;
+          var b = ns[j], gap = Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r;
+          if (gap < worst) worst = gap;
+          if (gap < 0) over.push(a.id + "/" + b.id + " " + gap.toFixed(2) + "px");
+        });
+      }
+    });
+    return { n: ns.length, over: over, worst: worst };
+  })()`);
+  const detail = `${r.n} dots; closest pair ${r.worst.toFixed(2)} px apart edge to edge`;
+  return { ok: !r.over.length, detail: r.over.length ? `${r.over.length} pairs overlap: ${r.over.slice(0, 3).join(", ")}  ||  ${detail}` : detail };
+}, { on: "all" });
+
 check("band assignment obeys its two hard rules", async (p) => {
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {}, rows = {i: 0, o: 0};
@@ -577,7 +843,7 @@ check("layout matches its golden snapshot", async (p) => {
     __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
     return { band: band, positions: pos };
   })()`);
-  // github#113, decisions/0011
+  // github#113, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   if (dim !== "folder") {
     await p.eval(`__vg.setDim("folder"); void 0`);
     await settle(p);
@@ -630,7 +896,8 @@ check("layout matches its golden snapshot", async (p) => {
     parts.push("positions unchanged");
   }
   return { ok, detail: parts.join("; ") };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------- github#86, design/0015 */
 
@@ -667,6 +934,8 @@ async (p) => {
             (r.full ? ", both sides full width" : " <- the two sides are not equal and full width"),
   };
 }, { on: "all" });
+
+check("tags: small tags keep separate wedges and interrupted defaults retain note identity", groupingRegressionCheck, { clock: "real" });
 
 check("tags: every note is filed in exactly one wedge, in either dimension", async (p) => {
   const r = await p.j(`(function(){
@@ -720,7 +989,8 @@ check("tags: every note is filed in exactly one wedge, in either dimension", asy
             (r.folder.twice + r.tag.twice ? `; ${r.folder.twice + r.tag.twice} note(s) in TWO cells` : "") +
             (r.misfiled.length ? `; MISFILED ${r.misfiled.join(", ")}` : ""),
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: the switch lands where a fresh relayout would, and comes home exactly",
 async (p) => {
@@ -762,9 +1032,12 @@ async (p) => {
             `round trip ${r.trip.moved} moved (worst ${r.trip.worst}` +
             (r.trip.who ? `, #${r.trip.who}` : "") + ")",
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
+  // github#151 -- the Tags button persists the dimension, setDim() does not
+  const storedWas = await storeSnap(p);
   await clearRange(p);
   await settle(p);
   await camSettle(p);
@@ -797,7 +1070,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       Object.keys(b).forEach(function (id) {
         // a dot that has left stands in its final seat, under its new group
         var a = __vg.graph.getNodeAttributes(id);
-        if (Math.abs(a.x - b[id].x) > 0.5 || Math.abs(a.y - b[id].y) > 0.5 || __vg.groupOf(id) !== b[id].g) return;
+        if (__vg.groupOf(id) !== b[id].g || a.standIn) return;
         if ((__vg.alpha[id] || 0) <= 0.004) return;
         standing++;
         var c = __vg.nodeColor(id);
@@ -825,17 +1098,25 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   await p.j(`(function(){ delete window.__smokeLeft; delete window.__smokeRows; __vg.setDim("folder"); return true; })()`);
   await settle(p);
   await camSettle(p);
+  // github#151
+  await storeBack(p, storedWas);
   return {
-    ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
+    ok: dotFrames === 0 && rowFrames === 0 && samples > 3 && standingFrames > 0,
     detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
             `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
             (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : "") +
             `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
             (rowExample ? ` (e.g. ${rowExample})` : ""),
   };
-}, { on: WALK, clock: "real" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
+  const foldWas = await p.j("__vg.foldSwitch");
+  try {
+  await p.eval("__vg.foldSwitch = false; void 0");
+  // github#151 -- the Tags button persists the dimension, setDim() does not
+  const storedWas = await storeSnap(p);
   await clearRange(p);
   await settle(p);
   await camSettle(p);
@@ -904,6 +1185,8 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   await eye(pick.g);
   await settle(p);
   await camSettle(p);
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3 && left === 0 && nodesEnd === n.nodes,
     detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
@@ -911,7 +1194,72 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
-}, { on: WALK, clock: "real" });
+  } finally { await p.eval(`__vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`); }
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: parallel Refresh preserves link-based sizes during and after the switch", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
+  try {
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionSizingCheck(p);
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p); await storeBack(p, storedWas);
+  }
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
+
+check("tags: parallel Refresh reverses the old disc and builds the new disc", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
+  try {
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionRefreshCheck(p);
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p); await storeBack(p, storedWas);
+  }
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: hiding the tab midway through a fold releases its temporary state", async (p) => {
+  const storedWas = await storeSnap(p);
+  const foldWas = await p.j("__vg.foldSwitch");
+  await settle(p);
+  try {
+    await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
+    await p.eval('document.querySelector(\'#vg-dim button[data-dim="tag"]\').click(); void 0');
+    await sleep(500);
+    const r = await p.j(`(function () {
+      var running = __vg.foldActive && __vg.demo.busy(), before = __vg.standIns().length;
+      var descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+      try {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      } finally {
+        if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+        else delete document.visibilityState;
+      }
+      var settled = {}, drift = 0;
+      __vg.graph.forEachNode(function (id, a) { settled[id] = { x: a.x, y: a.y }; });
+      __vg.applyLayout(false); __vg.applyLayout(false);
+      __vg.graph.forEachNode(function (id, a) {
+        var b = settled[id]; drift = Math.max(drift, Math.hypot(a.x - b.x, a.y - b.y));
+      });
+      return { running: running, before: before, after: __vg.standIns().length,
+        active: __vg.foldActive, busy: __vg.demo.busy(), drift: drift };
+    })()`);
+    return { ok: r.running && r.before > 0 && r.after === 0 && !r.active && !r.busy && r.drift < 0.5,
+      detail: `running ${r.running}; stand-ins ${r.before} -> ${r.after}; active ${r.active}; ` +
+        `busy ${r.busy}; relayout ${r.drift.toFixed(3)}` };
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p);
+    await storeBack(p, storedWas);
+  }
+}, { clock: "real", leaves: ["state.hidden"] });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
@@ -942,7 +1290,8 @@ check("tags: the two buckets stay out of the hue rotation and sort last", async 
             `${r.untagged}, (unlinked) ${r.unlinked} (both want the archive grey g11); ` +
             `${r.hues.length} real tags take ${r.hues.length - r.repeats} distinct slots`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: each dimension keeps its own hidden and collapsed state", async (p) => {
   const r = await p.j(`(function(){
@@ -995,7 +1344,8 @@ check("tags: each dimension keeps its own hidden and collapsed state", async (p)
             `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
             `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async (p) => {
   const r = await p.j(`(function(){
@@ -1055,7 +1405,8 @@ check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async
             (r.deeper.length ? `, and a depth-2 tag nests below it: ${r.deeper.join(", ")}`
                              : "; no depth-2 tag was reachable"),
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("arc: a plan over the whole circle is the resting disc, and over half of it stays in half",
 async (p) => {
@@ -1094,6 +1445,8 @@ async (p) => {
 }, { on: "all" });
 
 check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
+  // github#151, github#186
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     // github#86, design/0015 -- the panel is opened on the FOLDER disc and switched to the Tags
     // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
@@ -1143,6 +1496,7 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
     gear.click();
     return out;
   })()`);
+  await storeBack(p, storedWas);
   if (r.none) return { ok: true, detail: "no settings panel on this host -- the plugin owns it" };
   const ok = r.tabs.join(",") === "folder,tag" && r.dim === "folder" && r.tagRows > 0 &&
              r.namesMatch && r.folderMapSize === 0 && r.foldersSame && r.colourSame &&
@@ -1155,7 +1509,8 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
               : "; no tag row to pin") +
             `; folder map ${r.folderMapSize} entries, folder order kept ${r.foldersSame}, folder colours kept ${r.colourSame}`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 /* -------------------------------------------------------------- github#116 */
 
@@ -1224,7 +1579,8 @@ async (p) => {
               ? `gear, search, segment, its Tags side, All, legend and Refresh all at the same edges`
               : `MOVED ${moved.map((k) => `${k} [${r.folder.at[k]}] -> [${r.tag.at[k]}]`).join(", ")}`),
   };
-});
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------------------- github#71 -- */
 
@@ -1615,6 +1971,101 @@ check("the vault root sorts with the folders, and keeps its colour there", async
                           : "every automatic slot unchanged")
   };
 }, { on: "all" });   // github#164 -- every fixture that has a root group
+check("parent tags only leaves no sub-wedge, keeps the rings, and off is today's tag view", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    __vg.setParentTagsOnly(false);
+    __vg.setDim("tag");
+    var rd = function(){
+      var gs = __vg.groupsOf("tag"), subs = 0;
+      gs.forEach(function(g){ subs += g.subs.filter(function(s){ return s.name; }).length; });
+      var L = __vg.geomLock;
+      return { subs: subs, order: __vg.groupOrder().join("|"), rings: L ? [L.r0, L.rOuter, L.maxR] : null,
+               parity: __vg.checkPlanParity().parityOK };
+    };
+    var off = rd();
+    __vg.setParentTagsOnly(true);  var on = rd();
+    __vg.setParentTagsOnly(false); var back = rd();
+    __vg.setDim("folder");
+    return { off: off, on: on, back: back, chip: document.getElementById("vg-parents").hidden };
+  })()`);
+  if (r.off.subs === 0) return { ok: true, detail: "NOT ASSERTED: this vault's tag view has no sub-wedges to remove" };
+  const sameRings = JSON.stringify(r.on.rings) === JSON.stringify(r.off.rings);
+  const restored = r.back.subs === r.off.subs && r.back.order === r.off.order &&
+                   JSON.stringify(r.back.rings) === JSON.stringify(r.off.rings);
+  const walkRead = `(function(){
+    var gs = __vg.groupsOf("tag"), subs = 0;
+    gs.forEach(function(g){ subs += g.subs.filter(function(s){ return s.name; }).length; });
+    var L = __vg.geomLock;
+    return { subs: subs, rings: L ? [L.r0, L.rOuter, L.maxR] : null, parity: __vg.checkPlanParity().parityOK,
+             pressed: document.getElementById("vg-parents").getAttribute("aria-pressed") };
+  })()`;
+  await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
+  await settle(p);
+  const w0 = await p.j(walkRead);
+  await p.eval(`document.getElementById("vg-parents").click(); void 0`);
+  await settle(p);
+  const w1 = await p.j(walkRead);
+  await p.eval(`document.getElementById("vg-parents").click(); void 0`);
+  await settle(p);
+  const w2 = await p.j(walkRead);
+  await p.j(`(function(){ __vg.setDim("folder"); return true; })()`);
+  const walked = w1.subs === 0 && w1.pressed === "true" && w1.parity === true &&
+                 JSON.stringify(w1.rings) === JSON.stringify(w0.rings) &&
+                 w2.subs === w0.subs && JSON.stringify(w2.rings) === JSON.stringify(w0.rings);
+  return {
+    ok: r.on.subs === 0 && r.on.order === r.off.order && sameRings && restored &&
+        r.on.parity === true && r.chip === true && walked,
+    detail: `sub-wedges ${r.off.subs} -> ${r.on.subs} -> ${r.back.subs}; same groups in the same order ` +
+            `${r.on.order === r.off.order}; rings kept ${sameRings}; off restores today's view ${restored}; ` +
+            `plan parity ${r.on.parity}; chip hidden in the folder view ${r.chip}; ` +
+            `on the cascade: sub-wedges ${w0.subs} -> ${w1.subs} -> ${w2.subs}, rings kept ${walked}`
+  };
+}, { on: "all", leaves: ["state.hidden", "vg.geomLock", "store.settings"] });   // github#203
+
+// github#203
+check("parent tags only preserves subtag filters through the cascade", async (p) => {
+  const storedWas = await storeSnap(p);
+  await settle(p);
+  try {
+    const r = await p.j(`(async function () {
+      __vg.setParentTagsOnly(false); __vg.setDim("tag");
+      var saved = Object.assign({}, __vg.state.hiddenSub), scale = __vg.timeScale, results = [];
+      __vg.timeScale = 0.1;
+      var shown = function () { return __vg.graph.nodes().filter(function (id) {
+        return (__vg.alpha[id] || 0) > 0.004;
+      }).sort(); };
+      try {
+        for (var key of ["area/health", "area/health/sleep"]) {
+          __vg.state.hiddenSub = Object.assign({}, saved); __vg.relayout();
+          var before = shown();
+          __vg.state.hiddenSub[key] = true; __vg.relayout();
+          var expected = shown(), excluded = before.filter(function (id) { return expected.indexOf(id) < 0; });
+          var peaks = [], same = [];
+          for (var on of [true, false]) {
+            document.getElementById("vg-parents").click();
+            var peak = 0, limit = performance.now() + 15000;
+            do {
+              peak = Math.max(peak, excluded.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length);
+              if (performance.now() > limit) throw Error("Parent tag filter cascade did not settle");
+              await new Promise(function (resolve) { requestAnimationFrame(resolve); });
+            } while (__vg.demo.busy());
+            peaks.push(peak);
+            same.push(__vg.parentTagsOnly === on && JSON.stringify(shown()) === JSON.stringify(expected) &&
+              !!document.querySelector('#vg-legend [data-row="area"] .subhid') === on);
+          }
+          results.push({ key: key, excluded: excluded.length, visible: expected.length, peaks: peaks, same: same });
+        }
+        return results;
+      } finally {
+        __vg.setParentTagsOnly(false); __vg.state.hiddenSub = saved;
+        __vg.relayout(); __vg.setDim("folder"); __vg.timeScale = scale;
+      }
+    })()`);
+    return { ok: r.every(x => x.excluded > 0 && x.visible > 0 && x.peaks.every(n => n === 0) && x.same.every(Boolean)),
+             detail: JSON.stringify(r) };
+  } finally { await settle(p); await storeBack(p, storedWas); }
+}, { on: ["tag-vault"], clock: "real", leaves: ["state.hidden", "vg.geomLock"] });
 
 /* ------------------------------------------------- github#86 D-9, design/0015 */
 
@@ -1771,6 +2222,8 @@ check("a recent chip dims what it did not match, and gives it back", async (p) =
 }, { on: "all" });
 
 check("a lit note stays lit while a dimension switch draws it as a stand-in", async (p) => {
+  // github#151 -- the Tags button persists the dimension, setDim() does not
+  const storedWas = await storeSnap(p);
   // github#70, github#86
   await clearRange(p);
   await settle(p);
@@ -1812,6 +2265,8 @@ check("a lit note stays lit while a dimension switch draws it as a stand-in", as
   await p.j(`(function(){ __vg.setDim("folder"); __vg.setRecent(null); return true; })()`);
   await settle(p);
   await camSettle(p);
+  // github#151
+  await storeBack(p, storedWas);
   // github#70
   return { ok: disagreed === 0 && litStandIns > 0 && samples > 3,
            detail: `${armed.lit} lit before the switch; ${samples} samples, ` +
@@ -1819,7 +2274,8 @@ check("a lit note stays lit while a dimension switch draws it as a stand-in", as
                    `${disagreed} disagreeing with their own note` +
                    (example ? ` (e.g. ${example})` : "") +
                    (litStandIns ? "" : "  <- NOTHING ASSERTED: no stand-in was ever lit") };
-}, { on: ["demo-vault", "tag-vault"], clock: "real" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: ["demo-vault", "tag-vault"], clock: "real", leaves: ["state.hidden"] });
 
 check("the band counts the date it names", async (p) => {
   const r = await p.j(`(function(){
@@ -2089,9 +2545,9 @@ check("highlighting ramps per note and is additive", async (p) => {
 check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- an untagged arrival lands in (untagged)
-  // github#86, decisions/0011 -- a switched-to disc keeps its borrowed rings
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
   await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
   await settle(p);
@@ -2126,7 +2582,8 @@ check("tags: a live rebuild in the tag disc refiles the arrival and keeps the ri
                        `rings ${start.rings ? start.rings.dim : "none"} -> ${after.rings ? after.rings.dim : "none"}, ` +
                        `r0 step ${isNaN(r0Step) ? "?" : r0Step.toFixed(4)}; restored to ${back.moved} off original` +
                        (back.who ? ` (worst ${back.worst}, ${back.who})` : "") };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("hover re-arms after the pointer leaves the stage", async (p) => {
   // github#7
@@ -2265,9 +2722,12 @@ async function stageBox(p) {
              cx: r.left + r.width/2, cy: r.top + r.height/2 }; })()`);
 }
 
+// github#111 -- reads the page's own FIT_RATIO, not a copy
 async function camReset(p) {
-  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.954,angle:0}); void 0`);
+  const fr = await p.j(`__vg.FIT_RATIO`);
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:${fr},angle:0}); void 0`);
   await sleep(250);
+  return fr;
 }
 
 async function camSettle(p, ms = 4000) {
@@ -2329,10 +2789,10 @@ check("double-clicking the graph resets the view", async (p) => {
     await sleep(40);
   }
   const c = await camSettle(p);
-  await camReset(p);
+  const fr = await camReset(p);
   return {
-    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 0.954) < 0.02,
-    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 0.954`,
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - fr) < 0.02,
+    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) ${fr}`,
   };
 });
 
@@ -2449,6 +2909,8 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
 // github#82
 check("the panel toggles fold each panel away and give the space back", async (p) => {
   // github#82 -- pinned: this suite's own window is a grid slot
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   await p.send("Emulation.setDeviceMetricsOverride",
                { width: 1280, height: 900, deviceScaleFactor: dpr, mobile: false });
@@ -2541,6 +3003,8 @@ check("the panel toggles fold each panel away and give the space back", async (p
   const d = await shot();
   await p.send("Emulation.clearDeviceMetricsOverride");
   await sleep(360);
+  // github#151
+  await storeBack(p, storedWas);
 
   const badBtn = btns.buttons.filter((x) => x.missing || x.w !== 31 || x.h !== 31 ||
                                             !x.svg || !x.label || !x.inside);
@@ -2778,6 +3242,8 @@ const settlePan = async (p) => {
 
 // github#170
 check("a phone gets the disc whole and clear, on a page that scrolls", async (p) => {
+  // github#151 -- the phone path writes the store; put back what was there
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   // github#170 -- these emulate touch, so they own putting the page back
   const restore = async () => {
@@ -2986,12 +3452,16 @@ check("a phone gets the disc whole and clear, on a page that scrolls", async (p)
     said.push(`a desk's stored "open" does not reach a phone, and a tap here left it ${kept}`);
   } finally {
     await restore();
+    // github#151
+    await storeBack(p, storedWas);
   }
   return { ok: bad.length === 0, detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
 });
 
 // github#170 -- the other half of the predicate: narrow alone is not a phone
 check("a narrow window with a pointer keeps the desktop's answer", async (p) => {
+  // github#151 -- the phone path writes the store; put back what was there
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   let r = null;
   try {
@@ -3004,6 +3474,10 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
     r = await p.j(PHONE_PROBE);
   } finally {
     await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    // github#151 -- the resize saves again a frame later, so restore after it
+    await settle(p);
+    await sleep(1200);
+    await storeBack(p, storedWas);
     await sleep(500);
     await reboot(p);
     await settlePan(p);
@@ -3020,7 +3494,8 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
             `${r && r.bandOpen ? "open" : "FOLDED"} (data-band ${r && r.dataBand})` +
             (ok ? "" : "  <- A NARROW DESKTOP WINDOW TOOK THE PHONE LAYOUT"),
   };
-});
+  // github#151 -- leaves store.settings: the resize saves after the check
+}, { leaves: ["store.settings"] });
 
 // github#173, design/0013 -- the three items that reproduced, one check each
 const PHONE_TRACE_ON = `(function () { window.__sev = [];
@@ -3082,6 +3557,7 @@ const phoneOff = async (p) => {
 check("a settings push keeps a phone's zoom", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   try {
     for (const d of PHONE_DEVICES) {
       await phoneOn(p, d, dpr);
@@ -3131,6 +3607,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
     said.push(`a desk still follows the row: off ${deskOff}, on ${deskOn}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3140,6 +3617,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
 check("the calendar follows a phone that rotates", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   const store = (v) => p.j(`(function () { try {
       var k = window.SETTINGS_KEY; if (!k) return "no key";
       var s = JSON.parse(window.localStorage.getItem(k) || "{}");
@@ -3219,6 +3697,7 @@ check("the calendar follows a phone that rotates", async (p) => {
               `a phone's tap opened it and left the store ${kept}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3323,6 +3802,8 @@ check("a swipe after Fit still scrolls, and a late finger still pinches", async 
 // github#175, design/0013 -- the four items raised after github#173 merged
 // github#175 -- items 1 and 2: setPan(false) flew a disc home
 check("a swipe in the tail of a fit flight still scrolls", async (p) => {
+  // github#151, github#180 -- the phone path writes the store
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
   const swipe = async (c) => {
@@ -3358,16 +3839,25 @@ check("a swipe in the tail of a fit flight still scrolls", async (p) => {
       const c = await discAt(p);
       await p.eval(`(function () { var b = document.getElementById("vg-reset");
                      if (b) b.click(); })(); void 0`);
-      // github#175 -- 345ms into a 380ms flight: its tail, where the ratio has
-      // github#175 -- climbed back over phonePanWanted()'s own threshold
-      await sleep(345);
-      const tail = await camRatio(p);
+      // github#175, github#180 -- the tail of a 380ms flight, where the ratio climbs back
+      // github#175, github#180 -- over phonePanWanted()'s own threshold. A fixed sleep(345)
+      // github#175, github#180 -- took one sample and left the swipe to whatever CDP
+      // github#175, github#180 -- round-trip jitter landed around that instant -- flaky by
+      // github#175, github#180 -- as little as 0.00009 of the ratio. Poll into the band
+      // github#175, github#180 -- itself instead, and swipe the moment it is entered, so
+      // github#175, github#180 -- the sample cannot miss by a fraction of a percent the way
+      // github#175, github#180 -- a single fixed-delay read can.
+      const threshold = FIT * 0.995, ceiling = FIT - 1e-5;
+      let tail = await camRatio(p);
+      for (const dl = Date.now() + 379; Date.now() < dl && !(tail > threshold && tail < ceiling);) {
+        tail = await camRatio(p);
+      }
       const { trace, held } = await swipe(c);
       // github#175 -- both halves, or a pass is meaningless: the finger has to
       // github#175 -- land with the flight still up AND past the pan threshold
-      if (!(tail > FIT * 0.995 && tail < FIT - 1e-5)) {
+      if (!(tail > threshold && tail < ceiling)) {
         bad.push(`${d.name}: the finger missed the tail (ratio ${tail}, fit ${FIT}, ` +
-                 `threshold ${+(FIT * 0.995).toFixed(5)}) -- retimed, not fixed`);
+                 `threshold ${+threshold.toFixed(5)}) -- retimed, not fixed`);
       }
       if (held) {
         bad.push(`${d.name}: panning was armed as the swipe began -- setPan(false) ` +
@@ -3376,13 +3866,15 @@ check("a swipe in the tail of a fit flight still scrolls", async (p) => {
       if (!free(trace)) {
         bad.push(`${d.name}: the flight's tail claimed the swipe [${trace}]`);
       }
-      said.push(`${d.name}: fit ${FIT}, zoomed ${zoomed}, at +345ms ${tail}, ` +
+      said.push(`${d.name}: fit ${FIT}, zoomed ${zoomed}, at the tail ${tail}, ` +
                 `panning ${held ? "ARMED" : "off"}, [${trace}]`);
       await sleep(700);
       await settlePan(p);
     }
   } finally {
     await phoneOff(p);
+    // github#151, github#180
+    await storeBack(p, storedWas);
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3598,7 +4090,16 @@ check("the disc's density follows the notes on screen", async (p) => {
       __vg.renderer.refresh();
     })()`);
     await sleep(400);
-    return p.j("__vg.densityReport()");
+    // github#186 -- at ratio 1, so the screen floor reads alike in every state
+    await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0");
+    await sleep(150);
+    const r = await p.j("__vg.densityReport()");
+    // github#186 -- every shown dot's radius, bounded against its own rest
+    r.sizes = await p.j(`(function () { var o = {}; __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      o[id] = __vg.renderer.scaleSize(d.size); }); return o; })()`);
+    return r;
   };
 
   const rows = [await at(1), await at(0.8), await at(0.6), await at(0.4)];
@@ -3660,19 +4161,170 @@ check("the disc's density follows the notes on screen", async (p) => {
   const grew = widest.sp > 1.05 ? widest.sizeMedian / base.sizeMedian : 1;
   const dss = sq.map((q) => q.ds).filter((v) => v > 0);
   const dsLo = dss.length ? Math.min(...dss) : 1, dsHi = dss.length ? Math.max(...dss) : 1;
-  const size_ok = !dss.length || (dsLo >= 0.15 && dsHi <= 0.8 && dsHi / dsLo < 2.2);
+  // github#186 -- the lattice follows the notes; a dot stays within
+  // github#186 -- the accepted count floor may exceed DOT_GROW_MAX
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
+  let under = 0, over = 0, compared = 0, worstLo = 1, worstHi = 1;
+  for (const r of rows.slice(1)) {
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, Object.keys(base.sizes).length / Math.max(1, Object.keys(r.sizes).length))));
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = base.sizes ? base.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
+    }
+  }
+  const size_ok = under === 0 && over === 0;
 
   return {
     ok: square_ok && size_ok,
     detail: `step/pitch per band over ${sq.length} sampled states: ` +
             sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
             ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
-            ` diameter/step ${dsLo}-${dsHi} (needs 0.15-0.80, spread <2.2)` +
+            ` ${compared} dot-states against their unfiltered size: ${under} under (worst ${worstLo.toFixed(2)}x), ` +
+            `${over} past the rest/count bound (worst ${worstHi.toFixed(2)}x); median dot grew ${grew.toFixed(2)}x, ` +
+            `diameter/step ${dsLo}-${dsHi} (context, not asserted)` +
             `; context, not asserted: pitch*sqrt(shown) ` +
             roots.map((v) => Math.round(v)).join("/") + ` spread ${spread.toFixed(3)}x` +
             `; spacing reached ${widest.sp} at ${widest.shown} of ` +
             `${base.shown} shown, median dot ${base.sizeMedian} -> ${widest.sizeMedian}` +
             ` (${grew.toFixed(2)}x)`,
+  };
+}, { on: "all" });
+
+// github#186
+check("hidden defaults do not change visible geometry or dots on mount and Refresh", hiddenBaselineCheck);
+check("hidden defaults do not change visible geometry or dots after animated Refresh", hiddenBaselineCheck,
+  { clock: "real" });
+check("hidden defaults do not change the separate unlinked group", p => hiddenBaselineCheck(p, false));
+check("a cascade keeps moving notes inside separate wedges", cascadeWedgesCheck,
+  { on: ["demo-vault", "shape-vault", "tag-vault"], clock: "real" });
+
+check("a page that lays out filtered still takes its dots' rest from the unfiltered disc", async (p) => {
+  const clear = `__vg.state.hidden[__vg.state.dim] = Object.fromEntries(
+    __vg.groupOrder().filter(g => __vg.hiddenByDefault(g)).map(g => [g, true])); __vg.state.hiddenSub = {};
+    __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
+  await p.eval(clear);
+  await sleep(200);
+  const direct = await p.j(`__vg.restDots()`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder();
+    var g = order.filter(function (x) { return !__vg.hiddenByDefault(x); })[0];
+    var h = Object.assign({}, __vg.state.hidden[__vg.state.dim]); h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  const retaken = await p.j(`__vg.restDots()`);
+  await p.eval(`__vg.state.until = Math.max(2, Math.round(__vg.graph.order * 0.1));
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  const ranged = await p.j(`__vg.restDots()`);
+  await p.eval(clear);
+  await sleep(200);
+  await camReset(p);
+
+  const ids = Object.keys(direct);
+  let missing = 0, worst = 0, drift = 0;
+  for (const id of ids) {
+    if (!(retaken[id] > 0)) { missing++; continue; }
+    const d = Math.abs(retaken[id] / direct[id] - 1);
+    if (d > worst) worst = d;
+    if (ranged[id] !== retaken[id]) drift++;
+  }
+  return {
+    ok: ids.length > 0 && missing === 0 && worst < 0.01 && drift === 0,
+    detail: `${ids.length} dots at the unfiltered rest; with "${hid}" hidden and the rest forgotten, ` +
+            `${ids.length - missing} retaken (${missing} missing), worst ${(worst * 100).toFixed(2)}% off ` +
+            `(needs <1%); a sparse timeline then moved ${drift} of them (needs 0)`,
+  };
+}, { on: "all" });
+
+// github#186
+check("a rest taken at one stage size still bounds the dots at another", async (p) => {
+  const SIZES = `(function () { var R = __vg.renderer, o = {};
+    __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.5) o[id] = R.scaleSize(R.getNodeDisplayData(id).size); });
+    return o; })()`;
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const was = await p.j(`JSON.stringify(__vg.state.hidden[__vg.state.dim] || {})`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder(), g = order[order.length - 1], h = {}; h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  let carried, retaken;
+  try {
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 760, height: 640, deviceScaleFactor: dpr, mobile: false });
+    await sleep(900);
+    await settle(p);
+    await p.eval(`__vg.applyLayout(false); void 0`);
+    await sleep(200);
+    carried = await p.j(SIZES);
+    await p.eval(`__vg.forgetRest(); __vg.applyLayout(false); void 0`);
+    await sleep(200);
+    retaken = await p.j(SIZES);
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await sleep(600);
+    await p.eval(`__vg.state.hidden[__vg.state.dim] = ${was}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+    await sleep(200);
+    await camReset(p);
+  }
+  const ids = Object.keys(retaken);
+  let worst = 0, off = 0;
+  for (const id of ids) {
+    const d = Math.abs((carried[id] || 0) / retaken[id] - 1);
+    if (d > 0.01) off++;
+    if (d > worst) worst = d;
+  }
+  return {
+    ok: ids.length > 0 && off === 0,
+    detail: `"${hid}" hidden, rest taken, stage resized to 760x640: ${off} of ${ids.length} dots ` +
+            `differ from a rest retaken at the new size by more than 1% (worst ${(worst * 100).toFixed(1)}%)`,
+  };
+}, { on: "all" });
+
+// github#171
+check("a dot is the same size against the lattice in a bigger window", async (p) => {
+  const UNITS = `(function () { var R = __vg.renderer, u = __vg.densityReport().unitPx, o = {};
+    __vg.graph.forEachNode(function (id) { var d = R.getNodeDisplayData(id);
+      if ((__vg.alpha[id] || 0) > 0.5 && d && !d.hidden) o[id] = R.scaleSize(d.size) / u; });
+    return o; })()`;
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const at = async (width, height) => {
+    await p.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: dpr, mobile: false });
+    await sleep(900);
+    await settle(p);
+    await camReset(p);
+    await p.eval(`__vg.applyLayout(false); void 0`);
+    await sleep(300);
+    return p.j(UNITS);
+  };
+  let small, big;
+  try {
+    small = await at(1700, 1100);
+    big = await at(2400, 1560);
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await sleep(600);
+    await settle(p);
+    await camReset(p);
+  }
+  const ids = Object.keys(small).filter((id) => big[id] > 0);
+  let worst = 0, off = 0;
+  for (const id of ids) {
+    const d = Math.abs(big[id] / small[id] - 1);
+    if (d > 0.01) off++;
+    if (d > worst) worst = d;
+  }
+  return {
+    ok: ids.length > 0 && off === 0,
+    detail: `stage at 1700x1100 then 2400x1560: ${off} of ${ids.length} dots change their size in ` +
+            `lattice units by more than 1% (worst ${(worst * 100).toFixed(2)}%)`,
   };
 }, { on: "all" });
 
@@ -3713,9 +4365,10 @@ check("the hub stays the same share of the disc as it is filtered", async (p) =>
 check("fit frames the disc that is actually there", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  const full = await camSettle(p);
-  const base = 0.954;
+  // github#151 -- toRest(), not camSettle(): the page says it is at rest
+  await toRest(p);
+  const full = await camState(p);
+  const base = await p.j(`__vg.FIT_RATIO`); // github#111
 
   const hid = await p.j(`(function(){
     var order = __vg.groupOrder();
@@ -3731,13 +4384,16 @@ check("fit frames the disc that is actually there", async (p) => {
     return { kept: keep.length, hidden: Object.keys(h).length, extent: Math.round(max) };
   })()`);
   await sleep(250);
-  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  const small = await camSettle(p);
+  // github#151 -- as above: the landed ratio is the whole assertion here
+  await toRest(p);
+  const small = await camState(p);
 
   const dens = await p.j(`__vg.densityReport()`);
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  await camReset(p);
+  // github#151 -- wait the re-fit out, then come home the page's own way
+  await settle(p);
+  await toRest(p);
   const want = base * Math.max(0.12, Math.min(1.35, dens.reach));
   return {
     ok: Math.abs(full.ratio - base) < 0.02 && Math.abs(small.ratio - want) < 0.03 &&
@@ -3813,12 +4469,42 @@ check("a resize re-centres a fitted disc on the new stage", async (p) => {
 }, { on: ["demo-vault"], clock: "real" });
 
 // github#14
+// github#151 -- snapshot the stored settings around a persisted control
+async function storeSnap(p) {
+  return p.j(`(function(){
+    try { return window.SETTINGS_KEY
+                 ? (window.localStorage.getItem(window.SETTINGS_KEY) === null
+                      ? null : window.localStorage.getItem(window.SETTINGS_KEY))
+                 : null; }
+    catch (e) { return null; }
+  })()`).catch(() => null);
+}
+/** @param {string | null} was */
+async function storeBack(p, was) {
+  await p.eval(`(function(){
+    try {
+      var k = window.SETTINGS_KEY;
+      if (!k) return;
+      var was = ${JSON.stringify(was)};
+      if (was === null) window.localStorage.removeItem(k);
+      else window.localStorage.setItem(k, was);
+    } catch (e) { /* a page with no store has nothing to put back */ }
+  })(); void 0`).catch(() => {});
+}
+
+// github#151
+async function keepSettings(p) {
+  const was = await p.j(`window.SETTINGS_KEY ? window.localStorage.getItem(window.SETTINGS_KEY) : null`);
+  return () => p.eval(`(function (v) { var k = window.SETTINGS_KEY; if (!k) return;
+    if (v === null) window.localStorage.removeItem(k); else window.localStorage.setItem(k, v);
+  })(${JSON.stringify(was)}); void 0`);
+}
 async function toRest(p) {
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   await camSettle(p);
   const dl = Date.now() + 4000;
   while (Date.now() < dl) {
-    if (await p.j(`!!__vg.camAtRest`)) return;
+    if (await p.j(`!!__vg.camAtRest && !__vg.demo.busy()`)) return;
     await sleep(60);
   }
 }
@@ -3842,27 +4528,38 @@ async function biggestGroup(p) {
 }
 // github#55
 async function watchDuringCascade(p, startRatio, capMs = 8000) {
-  var movedWhileBusy = false;
+  var movedWhileBusy = false, movedEarly = false, movedByLanding = false, firstMovePr = null, landingRatio = null;
   var deadline = Date.now() + capMs;
   for (;;) {
     // THE CASCADE, not busy(): the question is whether the camera moved while notes were still
     // leaving, and busy() also counts the hover-highlight ramp the eye click starts, which can
     // outlast the cascade under load -- measured once as "moved early: true" in a gate run and
     // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
-    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
+    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); var c = __vg.lastCascade(); return { busy: !!(w.cascade || w.play || w.anim),
+      cascade: !!w.cascade, pr: c && c.last ? c.last.pr : null,
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
     // github#19
     if (!s.busy) break;
-    if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
+    const moved = Math.abs(s.ratio - startRatio) > 0.01;
+    if (moved) movedWhileBusy = true;
+    // github#186 -- a deferred fit rides the last third: nothing before pr 0.6,
+    // github#186 -- and by the landing the camera is on its way or there
+    if (s.cascade) {
+      if (moved && firstMovePr === null) firstMovePr = s.pr;
+      if (moved && s.pr !== null && s.pr < 0.6) movedEarly = true;
+      landingRatio = s.ratio;
+    }
     if (Date.now() > deadline) break;
     await sleep(60);
   }
+  if (landingRatio !== null && Math.abs(landingRatio - startRatio) > 0.01) movedByLanding = true;
   await sleep(500);
   const settled = await camState(p);
-  return { movedWhileBusy, finalRatio: settled.ratio };
+  return { movedWhileBusy, movedEarly, movedByLanding, firstMovePr, finalRatio: settled.ratio };
 }
 
-check("hiding the biggest group auto-fits the camera, but only once it has finished leaving", async (p) => {
+// github#14, github#186 -- the flight rides the last third and lands with the notes
+check("hiding the biggest group auto-fits the camera, riding the last third of the walk", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
   await toRest(p);
@@ -3872,25 +4569,27 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   if (!g) return { ok: false, detail: "no group to hide" };
 
   await clickEye(p, g);
-  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const { movedEarly, movedByLanding, firstMovePr, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const fr = await p.j(`__vg.FIT_RATIO`); // github#111
+  const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const shrinking = want < rest.ratio - 0.01;
 
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
+  // github#151 -- the eye, not the dict: the legend must rebuild
+  await clickEye(p, g);
+  await settle(p);
   await toRest(p);
 
   const atRest = await p.j(`__vg.camAtRest`);
   const ok = shrinking
-    ? (!movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    ? (!movedEarly && movedByLanding && Math.abs(finalRatio - want) < 0.03 && atRest)
     : true;
   return {
     ok,
     detail: shrinking
-      ? `hid "${g}" (reach ${dens.reach}): ratio held at ${rest.ratio} while notes left ` +
-        `(moved early: ${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ` +
-        `${want.toFixed(4)} promised, camAtRest ${atRest}`
+      ? `hid "${g}" (reach ${dens.reach}): ratio ${rest.ratio} held until pr 0.6 (moved early: ${movedEarly}), ` +
+        `first camera move at pr ${firstMovePr === null ? "never" : firstMovePr.toFixed(2)}, on its way by the landing: ${movedByLanding}, ` +
+        `landed at ${finalRatio.toFixed(4)} against ${want.toFixed(4)} promised, camAtRest ${atRest}`
       : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
         `this fixture -- nothing to assert`,
   };
@@ -3909,11 +4608,12 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
   await clickEye(p, g);
   const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const fr = await p.j(`__vg.FIT_RATIO`); // github#111
+  const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const growing = want > rest.ratio + 0.01;
 
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
+  // github#151 -- nothing to put back: the second eye click already did
+  await settle(p);
   await toRest(p);
 
   const atRest = await p.j(`__vg.camAtRest`);
@@ -3953,9 +4653,10 @@ check("a manually moved camera is left alone by a visibility toggle", async (p) 
   await sleep(3000);
   const after = await camState(p);
 
-  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)});
-    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)}); void 0`);
+  // github#151 -- the eye, not the dict: see the check above
+  await clickEye(p, g);
+  await settle(p);
   await toRest(p);
 
   return {
@@ -3983,6 +4684,8 @@ check("the zoom buttons step by one wheel notch", async (p) => {
 });
 
 check("the pan toggle locks the camera and flies home", async (p) => {
+  // github#151 -- first writer of store.settings; snapshot and restore
+  const storedWas = await storeSnap(p);
   await camReset(p);
   const box = await stageBox(p);
   const on = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
@@ -4016,6 +4719,8 @@ check("the pan toggle locks the camera and flies home", async (p) => {
   await camSettle(p);
   const back = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
   await camReset(p);
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: on === "true" && off.pressed === "false" && !off.setting && !off.api &&
         Math.abs(moved.x - 0.5) > 0.01 &&
@@ -4167,6 +4872,8 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
 
 // github#79
 check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
+  // github#151, github#180 -- #vg-pan: snapshot and restore, not the value
+  const storedWas = await storeSnap(p);
   // github#79, design/0017 -- ask Fit where it lands; FIT_RATIO is develop's to move
   const fitLanding = async () => {
     await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
@@ -4212,6 +4919,8 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
   await camSettle(p);
   await camReset(p);
+  // github#151, github#180
+  await storeBack(p, storedWas);
   return {
     ok: shown === true && flew1 &&
         Math.abs(landed.x - 0.5) < 0.002 && Math.abs(landed.y - 0.5) < 0.002 &&
@@ -4793,6 +5502,44 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 }, { on: WALK, clock: "real" });
 
+// github#186
+check("sparse filtered results stay unlabelled without explicit interaction", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const day = await p.j(`(function () {
+    var days = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.999 && a.created) {
+        var d = String(a.created).slice(0, 10);
+        days[d] = (days[d] || 0) + 1;
+      }
+    });
+    return Object.keys(days).sort().reverse().find(function (d) { return days[d] > 0 && days[d] <= 12; }) || null;
+  })()`);
+  if (!day) return { ok: false, detail: "fixture has no day with 1–12 notes" };
+  const labelInk = async () => p.j(`(function () {
+    var c = __vg.renderer.getCanvases().labels;
+    var bytes = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, ink = 0;
+    for (var i = 3; i < bytes.length; i += 4) if (bytes[i] > 32) ink++;
+    return ink;
+  })()`);
+  let sparseInk = 0;
+  try {
+    await p.eval(`__vg.setRange(${JSON.stringify(day)}, ${JSON.stringify(day)}); void 0`);
+    await settle(p);
+    await sleep(200);
+    sparseInk = await labelInk();
+  } finally {
+    await clearRange(p);
+    await settle(p);
+    await toRest(p);
+  }
+  const restInk = await labelInk();
+  return { ok: sparseInk === 0 && restInk === 0, detail: `${day}: ${sparseInk} automatic label pixels; cleared: ${restInk}` };
+});
+
+check("count-based note sizes ease through filtering and interruption", countSizingCheck, { on: "all", clock: "real" });
+
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
   await settle(p);
@@ -4800,11 +5547,13 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
     var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
-    var rows = {}, n = 0;
+    var rows = {}, n = 0, sizes = {};
     __vg.graph.forEachNode(function (id, at) {
       var d = __vg.renderer.getNodeDisplayData(id);
       if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
       n++;
+      // github#186 -- every lit dot's radius in units, bounded against its rest
+      sizes[id] = __vg.renderer.scaleSize(d.size) * perPx;
       var r = Math.hypot(at.x, at.y);
       var k = Math.round(r / 8) * 8;
       (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
@@ -4882,9 +5631,15 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              // these when there is no step to size a dot against.
              minDotPx: dots.length ? Math.round(dots[0] / perPx * 100) / 100 : 0,
              medDotPx: Math.round(medDot / perPx * 100) / 100,
-             rows: Object.keys(rows).length };
+             rows: Object.keys(rows).length, sizes: sizes, perPx: perPx };
   })()`;
+  // github#186 -- every probe at ratio 1: the floor is a screen size
+  // github#186 -- and the auto-fit would move it under the measure
+  const atOne = async () => { await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0"); await sleep(150); };
+  await atOne();
   const rest = await p.j(probe);
+  // github#186 -- growth is bounded by its rest or the accepted count floor
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
   const bad = [];
   const seen = [];
   const judge = (label, r) => {
@@ -4897,14 +5652,20 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear} = ` +
                `${r.worstRel}% of the row median`);
     }
-    // github#65
-    if (r.stepped) {
-      if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
-    } else if (r.minDotPx < rest.medDotPx) {
-      // github#53
-      bad.push(`${label}: no row holds four notes, and the smallest dot (${r.minDotPx}px) is ` +
-               `under the resting median (${rest.medDotPx}px)`);
+    // github#186 -- in place of github#65's step floor and github#53's
+    // github#186
+    let under = 0, over = 0, worstLo = 1, worstHi = 1, compared = 0;
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, rest.shown / Math.max(1, r.shown)))) * r.perPx;
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = rest.sizes ? rest.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
     }
+    if (under) bad.push(`${label}: ${under} of ${compared} dots under their resting size (worst ${worstLo.toFixed(2)}x)`);
+    if (over) bad.push(`${label}: ${over} of ${compared} dots past the rest/count bound (worst ${worstHi.toFixed(2)}x)`);
     if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
   };
 
@@ -4916,6 +5677,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     if (!hid) continue;
     await settle(p);
     await sleep(600);
+    await atOne();
     judge(`hidden through ${g}`, await p.j(probe));
   }
   for (const g of groups) {
@@ -4944,13 +5706,18 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       await p.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
       await settle(p);
       await sleep(600);
+      await atOne();
       judge(`range last ${Math.round(frac * 1000) / 10}%`, await p.j(probe));
     }
   }
   await clearRange(p);
+  // github#151 -- filtering crops the disc and lights the overview
+  await settle(p);
+  await toRest(p);
   return {
     ok: !bad.length,
-    detail: bad.length ? bad.slice(0, 4).join("; ")
+    // github#186
+    detail: bad.length ? bad.slice(0, 4).join("; ") + "  ||  " + seen.slice(-4).join(" | ")
                        : seen.slice(-4).join(" | "),
   };
 }, { on: "all" });
@@ -4958,6 +5725,45 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 // github#66
 // github#14
 // design/0011
+// github#151 -- the legend's eyes, snapshotted and put back
+async function eyesSnapshot(p) {
+  const eyes = await p.j(`(function(){
+    var out = {}, els = document.querySelectorAll("[data-eye]");
+    for (var i = 0; i < els.length; i++) {
+      out[els[i].getAttribute("data-eye")] = els[i].getAttribute("aria-pressed");
+    }
+    return out; })()`).catch(() => ({}));
+  const hidden = await p.j(`JSON.stringify(__vg.state.hidden.folder || {})`).catch(() => "{}");
+  return { eyes, hidden };
+}
+
+/** @param {{ eyes: Record<string, string>, hidden: string }} snap */
+async function restoreEyes(p, snap) {
+  // github#151 -- re-query after every click: the legend rebuilds
+  await p.j(`(function(){
+    var map = JSON.parse(${JSON.stringify(JSON.stringify(snap.eyes))});
+    for (var n = 0; n < 60; n++) {
+      var els = document.querySelectorAll("[data-eye]"), did = false;
+      for (var i = 0; i < els.length; i++) {
+        var k = els[i].getAttribute("data-eye");
+        if (map[k] !== undefined && els[i].getAttribute("aria-pressed") !== map[k]) {
+          els[i].click(); did = true; break;
+        }
+      }
+      if (!did) break;
+    }
+    return true; })()`).catch(() => 0);
+  await settle(p);
+  // github#151 -- applyHiddenDefaults() is the page's own way back
+  const stillOff = await p.j(
+    `JSON.stringify(__vg.state.hidden.folder || {}) !== ${JSON.stringify(snap.hidden)}`
+  ).catch(() => false);
+  if (stillOff) {
+    await p.eval(`__vg.applyHiddenDefaults(); void 0`).catch(() => {});
+    await settle(p);
+  }
+}
+
 async function walkSolo(p, fitOn) {
   await clearRange(p);
   await settle(p);
@@ -4965,6 +5771,8 @@ async function walkSolo(p, fitOn) {
   const hasFit = await p.j(`typeof __vg.fitCap === "boolean"`);
   if (fitOn && !hasFit) return { skip: "this build has no per-frame dot-size cap to switch on" };
   await p.eval(`__vg.fitCap = ${fitOn ? "true" : "false"}; void 0`);
+  // github#151 -- what the eyes read before this walk touches them
+  const eyesWere = await eyesSnapshot(p);
   const pick = await p.j(`(function(){
     var best = null;
     __vg.groupOrder().forEach(function (g) {
@@ -5007,13 +5815,8 @@ async function walkSolo(p, fitOn) {
   await camSettle(p);
   await sleep(300);
   const after = await p.j(SAMPLE);
-  const groups = await p.j(`__vg.groupOrder()`);
-  for (const g of groups) {
-    await p.j(`(function(){
-      var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
-      if (b && b.getAttribute("aria-pressed") === "false") b.click();
-      return true; })()`).catch(() => 0);
-  }
+  // github#151
+  await restoreEyes(p, eyesWere);
   await settle(p);
   await camSettle(p);
   if (hasFit) await p.eval(`__vg.fitCap = false; void 0`);
@@ -5034,6 +5837,7 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   if (r.skip) return { ok: true, detail: r.skip };
   if (r.fail) return { ok: false, detail: r.fail };
   return { ok: r.ok, detail: soloDetail(r) };
+  // github#151 -- nothing declared: walkSolo() restores through the page
 }, { on: WALK, clock: "real" });
 
 // design/0011
@@ -5051,6 +5855,8 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
   await clearRange(p);
   await settle(p);
   await camSettle(p);
+  // github#151
+  const eyesWere = await eyesSnapshot(p);
   const pair = await p.j(`(function(){
     var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
       .filter(function (x) { return x.n >= 2; }).sort(function (x, y) { return x.n - y.n; });
@@ -5087,14 +5893,8 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
     if (Date.now() - t0 > 12000) break;
   }
   await settle(p);
-  const groups = await p.j(`__vg.groupOrder()`);
-  for (const g of groups) {
-    await p.j(`(function(){
-      var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
-      if (b && b.getAttribute("aria-pressed") === "false") b.click();
-      return true; })()`).catch(() => 0);
-  }
-  await settle(p);
+  // github#151 -- the same restore as walkSolo(), for the same reason
+  await restoreEyes(p, eyesWere);
   await camSettle(p);
   const flickering = arriving.filter((id) => drops[id]);
   const worst = flickering.sort((x, y) => (drops[y] || 0) - (drops[x] || 0))[0];
@@ -5317,7 +6117,7 @@ check("the ribbon rescales with its slot", async (p) => {
     var slot = years.getBoundingClientRect().width;
     var last = bs.length ? bs[bs.length - 1] : null;
     var lastX = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 - rb.left : null;
-    return { rib: Math.round(rb.width), slot: Math.round(slot),
+    return { rib: Math.round(rb.width), slot: Math.round(slot), ribExact: rb.width,
              inline: rib.style.width, bitmap: rib.width,
              lastX: lastX === null ? null : Math.round(lastX) };
   })()`);
@@ -5337,12 +6137,13 @@ check("the ribbon rescales with its slot", async (p) => {
   const settled = await at();
 
   const tracks = rows.every((r) => Math.abs(r.rib - r.slot) <= 1);
-  const pinned = rows.every((r) => r.inline === r.rib + "px");
+  // github#186
+  const pinned = rows.every((r) => /px$/.test(r.inline) && Math.abs(parseFloat(r.inline) - r.ribExact) <= 0.5);
   const moved = new Set(rows.map((r) => r.lastX)).size === rows.length || rows.length < 2;
   const restored = Math.abs(settled.rib - settled.slot) <= 1;
   return {
     ok: tracks && pinned && moved && restored,
-    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot}` +
+    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot} (inline ${r.inline})` +
                             (r.lastX === null ? "" : `, last year at ${r.lastX}`)).join("; ") +
             `; cleared -> ${settled.rib}/${settled.slot}` +
             (tracks ? "" : "  <- STRIP DID NOT FOLLOW ITS SLOT") +
@@ -5356,10 +6157,7 @@ check("the intro sweeps the range end across the strip", async (p) => {
   await settle(p);
   const scale = await p.j(`__vg.timeScale`);
   await p.eval(`__vg.timeScale = 0.25; void 0`);
-  await p.eval(`document.querySelector("#vg-refresh").click(); void 0`);
-  const seen = [];
-  for (let i = 0; i < 90; i++) {
-    const r = await p.j(`(function(){
+  const SAMPLE = `(function(){
       var b = __vg.brushNow();
       if (!b) return null;
       var lit = 0; __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.004) lit++; });
@@ -5368,7 +6166,13 @@ check("the intro sweeps the range end across the strip", async (p) => {
                sweeping: b.sweeping, lit: lit,
                tip: tip && !tip.hidden ? tip.textContent : null,
                from: __vg.state.from, to: __vg.state.to, busy: !!__vg.demo.busy() };
-    })()`);
+    })()`;
+  // github#139
+  const seen = [];
+  const first = await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`);
+  if (first) seen.push(first);
+  for (let i = 0; i < 90; i++) {
+    const r = await p.j(SAMPLE);
     if (r) seen.push(r);
     if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
     await sleep(40);
@@ -5394,6 +6198,63 @@ check("the intro sweeps the range end across the strip", async (p) => {
             `state stayed null: ${stayedPreview}; handle labelled: ${labelled}` +
             (startedLeft ? "" : "  <- DID NOT START AT THE LEFT END") +
             (landedRight ? "" : "  <- DID NOT LAND ON THE RIGHT END"),
+  };
+}, { clock: "real" });
+
+// github#139
+check("the intro lights the disc note by note, and the heat cells follow", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const scale = await p.j(`__vg.timeScale`);
+  await p.eval(`__vg.timeScale = 0.25; void 0`);
+  const SAMPLE = `(function(){
+    var lit = 0, total = 0;
+    __vg.graph.forEachNode(function (id) { total++; if ((__vg.alpha[id] || 0) > 0.004) lit++; });
+    var h = __vg.heat, heatLit = 0;
+    if (h) for (var i = 0; i < h.keys.length; i++) { if ((h.days[h.keys[i]].n || 0) > 0.004) heatLit++; }
+    var b = __vg.brushNow(), lc = __vg.lastCascade();
+    return { lit: lit, total: total, heatLit: heatLit, sweeping: !!(b && b.sweeping),
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "",
+             busy: !!__vg.demo.busy() };
+  })()`;
+  // github#139
+  const seen = [await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`)];
+  for (let i = 0; i < 120; i++) {
+    const r = await p.j(SAMPLE);
+    if (r) seen.push(r);
+    if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
+    await sleep(40);
+  }
+  await p.eval(`__vg.timeScale = ${JSON.stringify(scale)}; void 0`);
+  await settle(p);
+  const rest = await p.j(SAMPLE);
+
+  const mid = seen.filter((r) => r.sweeping);
+  const end = seen[seen.length - 1];
+  const first = mid[0];
+  let litBack = 0, heatBack = 0, restarted = 0;
+  for (let i = 1; i < seen.length; i++) {
+    if (seen[i].lit < seen[i - 1].lit) litBack++;
+    if (seen[i].heatLit < seen[i - 1].heatLit) heatBack++;
+    if (seen[i].frames < seen[i - 1].frames) restarted++;
+  }
+  const startedEmpty = !!first && first.lit <= 0.05 * first.total;
+  const grew = mid.length >= 3 && mid[mid.length - 1].lit > first.lit;
+  const landedFull = !!end && rest.lit > 0 && end.lit === rest.lit;
+  const heatLanded = !!end && end.heatLit === rest.heatLit;
+  const oneCascade = !!end && end.path === "animated" && end.exit === "converged" && restarted === 0;
+  return {
+    ok: mid.length >= 3 && startedEmpty && grew && litBack === 0 && landedFull &&
+        heatBack === 0 && heatLanded && oneCascade,
+    detail: `${mid.length} sweeping frames; lit ${first ? first.lit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].lit : "-"} of ${rest.total}, ${litBack} backwards, ` +
+            `at rest ${rest.lit}; heat cells ${first ? first.heatLit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].heatLit : "-"}, ${heatBack} backwards, at rest ${rest.heatLit}; ` +
+            `cascade ${end ? end.path : "?"}, ${end ? end.frames : "?"} frames, ${restarted} restarts, ` +
+            `exit ${end ? end.exit : "?"}` +
+            (startedEmpty ? "" : "  <- THE DISC DID NOT START EMPTY") +
+            (landedFull ? "" : "  <- THE DISC DID NOT LAND FULL") +
+            (heatLanded ? "" : "  <- THE HEAT CELLS DID NOT FOLLOW"),
   };
 }, { clock: "real" });
 
@@ -5547,6 +6408,8 @@ check("the ribbon's right edge is a day the vault has actually reached", async (
 }, { on: "all" });
 
 check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5569,6 +6432,8 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
       "rendered row id and the $() lookup setCompactAxis uses have drifted apart again" };
   }
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5578,6 +6443,8 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
 
 // github#3
 check("colour unlinked by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5601,6 +6468,8 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
   // github#112
   await settle(p);
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5610,6 +6479,8 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
 
 // github#3
 check("colour unlinked notes by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5631,6 +6502,8 @@ check("colour unlinked notes by folder: the settings-panel toggle actually flips
       "rendered row id and the $() lookup setUnlinkedTintByFolder uses have drifted apart" };
   }
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5639,6 +6512,8 @@ check("colour unlinked notes by folder: the settings-panel toggle actually flips
 });
 
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
+  // github#151 -- first writer of store.settings; snapshot and restore
+  const storedWas = await storeSnap(p);
   // github#23
   const r = await p.j(`(function(){
     var btn = document.querySelector("#vg-compact");
@@ -5654,6 +6529,8 @@ check("compact axis: the view-level icon actually flips the live state, and pers
   })()`);
   if (r.noButton) return { ok: false, detail: "no #vg-compact on this build" };
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the icon: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5837,6 +6714,8 @@ check("a folder keeps its slot across the membership toggle", async (p) => {
 
 // github#34
 check("a folder's legend row toggles \"hidden by default\" from its context menu", async (p) => {
+  // github#151 -- the menu item persists folderShown; click it back
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
     var hiddenByDefault = function (x) {
@@ -5886,6 +6765,8 @@ check("a folder's legend row toggles \"hidden by default\" from its context menu
   }
   const ok = r.openedOk && r.pressedBefore === String(r.startShown) && r.closedAfter &&
              r.defaultFlipped && r.legendFollowed && r.settingsAgrees !== false;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `"${r.g}" started ${r.startShown ? "shown" : "hidden"} by default; ` +
     `menu opened with the toggle ${r.openedOk ? "present" : "MISSING"} ` +
     `(pressed=${r.pressedBefore}); after click: menu closed=${r.closedAfter}, ` +
@@ -5911,6 +6792,8 @@ async function pinN(p, n) {
 }
 
 check("a pinned note leaves no gap in the ring it came from", async (p) => {
+  // github#151 -- pinning writes the store; clearPins() leaves the key
+  const storedWas = await storeSnap(p);
   const gapOf = () => p.j(`(function(){
     // The busiest group, since a wedge with more notes in it has a tighter spacing and so
     // a missing one shows up more clearly against it.
@@ -5947,11 +6830,15 @@ check("a pinned note leaves no gap in the ring it came from", async (p) => {
   await p.eval(`__vg.clearPins(); void 0`);
   await settle(p);
   const ok = after.worst <= before.worst * 1.35 + 0.05;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `worst neighbour gap in ${before.group} (${before.notes} notes): ` +
                        `${before.worst}x median at rest -> ${after.worst}x with 6 pinned` };
 }, { on: "all" });
 
 check("the hub's dots shrink as it fills", async (p) => {
+  // github#151 -- pinning writes the store; clearPins() leaves the key
+  const storedWas = await storeSnap(p);
   const sizeAt = async (n) => {
     const ids = await pinN(p, n);
     return p.j(`(function(){
@@ -5962,6 +6849,8 @@ check("the hub's dots shrink as it fills", async (p) => {
   await p.eval(`__vg.clearPins(); void 0`);
   await settle(p);
   const ok = s1 > s3 && s3 > s6 && s6 > s13;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `1 -> ${s1}px, 3 -> ${s3}, 6 -> ${s6}, 13 -> ${s13}` +
                        (ok ? " (monotonic)" : "  NOT MONOTONIC") };
 }, { on: "all" });
@@ -6017,6 +6906,8 @@ check("a soloed hub-adjacent note stays inside the hub's own radius", async (p) 
 }, { on: "all" });
 
 check("the mark yields to the hub and comes back", async (p) => {
+  // github#151 -- pinning writes the store; clearPins() leaves the key
+  const storedWas = await storeSnap(p);
   const markOn = () => p.j(`(function(){
     var el = document.querySelector("#vg-logo");
     return { hidden: !!el.hidden, opacity: getComputedStyle(el).opacity }; })()`);
@@ -6034,11 +6925,15 @@ check("the mark yields to the hub and comes back", async (p) => {
   const back = await markOn();
   const ok = Number(rest.opacity) > 0.5 && Number(held.opacity) < 0.05 &&
              Number(back.opacity) > 0.5 && !held.hidden;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `opacity ${rest.opacity} at rest -> ${held.opacity} with 3 pinned ` +
                        `(hidden=${held.hidden}, must be false) -> ${back.opacity} cleared` };
 }, { clock: "real" });
 
 check("a pin hidden by a filter is skipped, not released", async (p) => {
+  // github#151 -- pinning writes the store; clearPins() leaves the key
+  const storedWas = await storeSnap(p);
   await pinN(p, 3);
   const before = await p.j(`__vg.pinned().length`);
   const drawnNow = () => p.j(`(function(){ var n = 0;
@@ -6055,6 +6950,8 @@ check("a pin hidden by a filter is skipped, not released", async (p) => {
   await settle(p);
   const ok = whileHidden === before && after === before &&
              drawnHidden < drawnRest && drawnBack === drawnRest;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `${before} pinned: ${drawnRest} drawn at rest -> ${drawnHidden} while ` +
                        `filtered out (still ${whileHidden} held) -> ${drawnBack} back, ` +
                        `${after} held` };
@@ -6097,7 +6994,10 @@ function pinIdentityBuilds() {
 }
 
 // github#143
+// github#151 -- leaves cam.ratio: a re-mount derives its own FIT_RATIO
 check("a pin is stored by the note's path, not by its position", async (p, ctx) => {
+  // github#151 -- first writer of store.settings; snapshot and restore
+  const storedWas = await storeSnap(p);
   const home = await p.eval("location.href");
   const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
   const goto = async (url, budget) => {
@@ -6170,7 +7070,10 @@ check("a pin is stored by the note's path, not by its position", async (p, ctx) 
     // github#105 -- home is ?rest: a full re-mount, the size of the fixture
     back = await goto(home, 30000);
     // github#143 -- leave the fixture's own store as this check found it
-    if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); }
+    // github#151 -- and its camera: clearing the pins re-fits the disc
+    if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); await camReset(p); }
+    // github#151 -- restores the FIXTURE page's store, after coming home
+    await storeBack(p, storedWas);
   }
   if (why) return { ok: false, detail: why };
   const want = ["B.md", "ghost:Missing"];
@@ -6196,7 +7099,7 @@ check("a pin is stored by the note's path, not by its position", async (p, ctx) 
       ? `a live rebuild dropping a pinned B.md left the host holding ${JSON.stringify(live.host)}`
       : "the host's store was unreadable, pruning not asserted") +
     (back ? "" : "; DID NOT GET BACK to the fixture") };
-});
+}, { leaves: ["cam.ratio"] });
 
 // github#3
 // github#3
@@ -6233,6 +7136,8 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
 // github#3
 // github#34
 check("the (unlinked) row's right-click toggle moves unlinked notes into their folder", async (p) => {
+  // github#151 -- the menu item persists unlinkedByFolder; toggle it back
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
     var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
@@ -6277,6 +7182,8 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
   r.matched = paint.matched;
   const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter &&
              r.turnedOn && r.countAfter === 0 && r.matched === r.ids;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `${r.ids} unlinked notes; menu opened with the toggle ` +
     `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count after=` +
@@ -6285,6 +7192,8 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
 
 // github#3
 check("the (unlinked) row's right-click tint toggle recolours notes without moving them", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
     var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
@@ -6324,6 +7233,8 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
   if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
   const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter && r.turnedOn &&
              r.countAfter === r.ids && r.matched === r.ids;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `${r.ids} unlinked notes kept separate; menu opened with the toggle ` +
     `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count still=` +
@@ -6334,6 +7245,8 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
 // github#50
 // github#50
 check("the (unlinked) row opens its menu with no notes in it", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
     var startOn = __vg.unlinkedByFolder;
@@ -6372,6 +7285,10 @@ check("the (unlinked) row opens its menu with no notes in it", async (p) => {
   if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to empty" };
   const ok = r.rowFound && r.empty === 0 && r.noEye && r.noOnly && r.dimmed &&
              r.openedOk && r.closedAfter === true && r.turnedOff === true;
+  // github#151
+  await storeBack(p, storedWas);
+  // github#186
+  await settle(p);
   return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
     `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
     `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
@@ -6627,7 +7544,8 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };
-}, { on: "all" });
+  // github#151 -- leaves state.collapsed: every row means every folder
+}, { on: "all", leaves: ["state.collapsed", "press.vg-legend"] });
 
 // github#78, design/0006
 check("the thinnest count bar survives a hover in pixels, not just in CSS", async (p) => {
@@ -6681,7 +7599,11 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
         if (rb > best) best = rb;
       }
       var el = document.querySelector(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
-      return { px: best, hovered: !!el && el.matches(':hover') };
+      var at = document.elementFromPoint(${row.cx}, ${row.cy});
+      var all = document.querySelectorAll(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
+      return { px: best, hovered: !!el && el.matches(':hover'),
+               at: at ? at.tagName.toLowerCase() + (at.id ? "#" + at.id : "") + "." + String(at.className).split(" ").join(".") : "none",
+               twins: all.length, first: el ? el.tagName.toLowerCase() + "." + String(el.className).split(" ").join(".") : "none" };
     })()`);
   };
 
@@ -6735,7 +7657,8 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
             `${lit.px}px highlighted (data-hl=${wasLit}); weakest asserted ${weakest}px of ` +
             states.map((s) => s[0]).join("/") +
             (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
-            (over.hovered ? "" : "  <- NO :hover from the harness") +
+            (over.hovered ? "" : `  <- NO :hover from the harness (under the pointer: ${over.at}; ` +
+              `${over.twins} element(s) carry this data-g, the first is ${over.first})`) +
             (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
   };
 });
@@ -6978,6 +7901,12 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
   })(); void 0`);
   await sleep(400);
   const restored = await read();
+  // github#151 -- the gear was un-hidden and the panel opened; close it
+  await p.eval(`(function(){
+    var g = document.getElementById('vg-gear');
+    if (g && g.getAttribute('aria-expanded') === 'true') g.click();
+  })(); void 0`).catch(() => {});
+  await sleep(200);
 
   const tokenMoved = before.token !== after.token;
   const swatchMoved = before.swatch !== after.swatch;
@@ -7010,6 +7939,8 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
 
 // github#78, design/0006
 check("count bars are on by default, and the settings toggle removes every bar", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -7052,6 +7983,8 @@ check("count bars are on by default, and the settings toggle removes every bar",
              r.offPressed === "false" && r.offState === false && r.barsOff === 0 &&
              r.sizeOff === "auto" && r.rowsOff === r.rows &&
              r.backPressed === "true" && r.backState === true && r.barsBack === r.barsOn;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok,
     detail: `default pressed=${r.defaultPressed} state=${r.defaultState} with ` +
@@ -7372,6 +8305,8 @@ check("the picker's settings surface holds every slot without scrolling sideways
 });
 
 check("the picker stays inside the mount", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var root = document.getElementById("vg-app");
     var rows = document.querySelectorAll('.lg[data-g]');
@@ -7389,6 +8324,8 @@ check("the picker stays inside the mount", async (p) => {
     menu.hidden = true;
     return out;
   })()`);
+  // github#151
+  await storeBack(p, storedWas);
   return { ok: r.inside && r.sws === 12,
            detail: `menu ${r.w}x${r.h} in a ${r.rootW}x${r.rootH} mount, ${r.sws} swatches, ` +
                    `${r.inside ? "inside" : "OUTSIDE the mount"}` };
@@ -7414,6 +8351,8 @@ const DEV_RIGHT_CLICK = `(function(){
 })()`;
 
 check("the disc's right-click does nothing until Developer debug is on", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
     // Whatever the host handed this page, assert from a known state.
@@ -7437,6 +8376,8 @@ check("the disc's right-click does nothing until Developer debug is on", async (
   })()`);
   const ok = !r.preventedOff && r.hiddenOff && r.preventedOn && r.openOn && r.hasGrid &&
              r.speeds.join(",") === "1,2,4,8" && r.swatches === 0 && r.shutByToggle;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `off: preventDefault=${r.preventedOff} (must be false so the host keeps ` +
     `its own menu), stayed hidden=${r.hiddenOff}; on: preventDefault=${r.preventedOn}, ` +
     `opened=${r.openOn}, grid item=${r.hasGrid}, speed multipliers=[${r.speeds.join(", ")}], ` +
@@ -7446,6 +8387,8 @@ check("the disc's right-click does nothing until Developer debug is on", async (
 
 // github#165
 check("a right-click on a note still pins it, and opens no developer menu", async (p) => {
+  // github#151 -- pinning writes the store; clearPins() leaves the key
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
     var o = document.getElementById("vg-graph").getBoundingClientRect();
@@ -7476,6 +8419,8 @@ check("a right-click on a note still pins it, and opens no developer menu", asyn
   })()`);
   if (r.skip) return { ok: true, detail: "no visible note to aim at on this shape" };
   const ok = r.pinned !== r.was && r.stayedShut && r.restored;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `aimed at a ${r.size}px note with Developer debug ON: pinned ` +
     `${r.was} -> ${r.pinned} (rightClickNode still owns it), developer menu stayed ` +
     `shut=${r.stayedShut}, pin restored=${r.restored}` };
@@ -7483,6 +8428,8 @@ check("a right-click on a note still pins it, and opens no developer menu", asyn
 
 // github#165
 check("the developer menu's grid item draws the wedge overlay", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   // github#165 -- settles between halves; the draw hook paints, not the click
   const before = await p.j(`(function(){
     var cv = document.querySelector(".vg-wedge-debug");
@@ -7514,6 +8461,8 @@ check("the developer menu's grid item draws the wedge overlay", async (p) => {
   })()`);
   const ok = !before.started && before.pressed === "false" && before.closed &&
              on.drawn && on.inHost && on.painted && on.pressed === "true" && off.gone;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `overlay at rest=${before.started} (must be false); the item reads ` +
     `pressed=${before.pressed} and closes the menu=${before.closed}; a frame later the ` +
     `lattice is drawn=${on.drawn} on a ${on.painted ? "sized" : "ZERO-SIZED"} canvas, ` +
@@ -7610,6 +8559,8 @@ check("the grid's key sits bottom left, clear of every button over the graph", a
 
 // github#165
 check("the developer menu's slow motion reaches the animation clock", async (p) => {
+  // github#151 -- restores a control the page persists
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
     var pick = function (mul) {
@@ -7638,6 +8589,8 @@ check("the developer menu's slow motion reaches the animation clock", async (p) 
   const ok = r.checked2Before === "false" && r.at2 === 2.5 && r.at8 === 10 &&
              r.marks.join(" ") === "1:false 2:false 4:false 8:true" &&
              r.back === 1.25 && r.restored === r.before;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `timeScale ${r.before} -> 2x=${r.at2} -> 8x=${r.at8} -> Normal=${r.back} ` +
     `(x1, x2, x4, x8 of the 1.25 default); reopened at 8x the marks read ` +
     `[${r.marks.join(", ")}]; restored to ${r.restored}` };
@@ -7645,6 +8598,12 @@ check("the developer menu's slow motion reaches the animation clock", async (p) 
 
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
+  // github#151 -- a report that never arrived is not an empty shape
+  if (typeof r.node === "undefined" || typeof r.geomGaps === "undefined") {
+    return { ok: false,
+             detail: `checkFocusWeb() returned no report (${JSON.stringify(r).slice(0, 80)}) -- ` +
+                     `nothing was measured, and this is not a shape with nothing to measure` };
+  }
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };
   return { ok: r.webOK,
            detail: `${r.node} (degree ${r.degree}, ${r.edges} edges): ${r.blueAtGaps} blue, ` +
@@ -7684,12 +8643,121 @@ async function hop(p, n) {
   }
   return n;
 }
-async function closeCard(p) { await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`); }
+// github#151 -- close the card, wait the flight out, then come home
+async function closeCard(p) {
+  await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`);
+  await settle(p);
+  await toRest(p);
+}
 async function stepBack(p) {
   const ok = await p.j(`(function(){ var b = document.querySelector("#vg-detail .crumbs .nvb"); if (!b) return false; b.click(); return true; })()`);
   await sleep(160);
   return ok;
 }
+
+// github#134, design/0019
+check("walk framing keeps the visible focus web on canvas", async (p) => {
+  const rows = [];
+  const storedWas = await storeSnap(p);
+  const sheetWas = await p.j(`__vg.sheetOpen`);
+  const panWas = await p.j(`__vg.panEnabled`);
+  let hiddenGroup = null;
+  try {
+    for (const [width, height] of [[960, 960], [1600, 1000], [420, 900]]) {
+      await p.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      await sleep(400);
+      await settle(p);
+      for (const rank of (width === 960 ? [0, 9, 99, 499, -1, -2, -3] : [0, 9, 99, 499, -1])) {
+        if (rank === -2) {
+          await p.eval(`__vg.setPanEnabled(false); void 0`);
+          await sleep(500);
+        }
+        if (rank === -3) {
+          hiddenGroup = await biggestGroup(p);
+          await clickEye(p, hiddenGroup);
+          await settle(p);
+          await sleep(500);
+        }
+        const before = await p.j(`__vg.renderer.getCamera().getState()`);
+        const picked = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, ids = [];
+          G.forEachNode(function (id, a) {
+            var d = R.getNodeDisplayData(id);
+            if (!a.dupOf && d && !d.hidden) ids.push(id);
+          });
+          ids.sort(function (a, b) { return G.getNodeAttribute(b, "deg") - G.getNodeAttribute(a, "deg"); });
+          var id = ids[${rank} === -1 ? ids.length - 1 : Math.min(Math.max(0, ${rank}), ids.length - 1)];
+          if (!id) return null;
+          var q = document.querySelector("#vg-q"); q.value = G.getNodeAttribute(id, "label");
+          q.dispatchEvent(new Event("input"));
+          var hit = Array.from(document.querySelectorAll("#vg-hits [data-hit]")).find(function (el) {
+            return el.getAttribute("data-hit") === id;
+          });
+          if (!hit) return null;
+          hit.click(); return id;
+        })()`);
+        await sleep(650);
+        const r = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, id = __vg.state.selected;
+          var dim = R.getDimensions(), set = {}, seen = {}, nodes = 0, offDots = 0, samples = 0, offCurve = 0;
+          set[id] = true;
+          G.forEachEdge(id, function (e, a, s, t) { set[s] = true; set[t] = true; });
+          Object.keys(set).forEach(function (n) {
+            var d = R.getNodeDisplayData(n);
+            if (!d || d.hidden || (__vg.alpha[n] || 0) <= 0.004) { delete set[n]; return; }
+            var v = R.graphToViewport(G.getNodeAttributes(n)), radius = R.scaleSize(d.size);
+            nodes++;
+            if (v.x - radius < -1 || v.x + radius > dim.width + 1 ||
+                v.y - radius < -1 || v.y + radius > dim.height + 1) offDots++;
+          });
+          Object.keys(set).forEach(function (n) {
+            G.forEachEdge(n, function (e, a, s, t) {
+              if (seen[e] || !set[s] || !set[t]) return;
+              seen[e] = true;
+              var ed = R.getEdgeDisplayData(e); if (!ed || ed.hidden) return;
+              var ps = R.graphToViewport(G.getNodeAttributes(s)), pt = R.graphToViewport(G.getNodeAttributes(t));
+              var k = ed.type === "curve" ? ed.curvature || 0 : 0;
+              var cx = (ps.x + pt.x) / 2 + (pt.y - ps.y) * k;
+              var cy = (ps.y + pt.y) / 2 - (pt.x - ps.x) * k;
+              for (var i = 0; i <= 40; i++) {
+                var u = i / 40, v = 1 - u;
+                var x = v * v * ps.x + 2 * v * u * cx + u * u * pt.x;
+                var y = v * v * ps.y + 2 * v * u * cy + u * u * pt.y;
+                samples++;
+                if (x < 0 || x > dim.width || y < 0 || y > dim.height) offCurve++;
+              }
+            });
+          });
+          return { id: id, nodes: nodes, offDots: offDots, samples: samples, offCurve: offCurve,
+                   ratio: R.getCamera().getState().ratio, camera: R.getCamera().getState() };
+        })()`);
+        const lockMoved = rank === -2 && (Math.abs(r.camera.x - before.x) > 1e-6 || Math.abs(r.camera.y - before.y) > 1e-6);
+        rows.push({ width, height, rank, picked, lockMoved, ...r });
+        if (rank === -2) await p.eval(`__vg.setPanEnabled(${panWas}); void 0`);
+        if (hiddenGroup) {
+          await clickEye(p, hiddenGroup);
+          hiddenGroup = null;
+          await settle(p);
+        }
+      }
+    }
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await sleep(400);
+    await closeCard(p);
+    if (hiddenGroup) { await clickEye(p, hiddenGroup); await settle(p); }
+    await p.eval(`(function () {
+      __vg.setPanEnabled(${panWas});
+      if (__vg.sheetOpen !== ${sheetWas}) document.querySelector("#vg-sheet").click();
+    })(); void 0`);
+    await sleep(500);
+    await storeBack(p, storedWas);
+  }
+  const failed = rows.filter((r) => !r.picked || r.id !== r.picked || !r.nodes || r.offDots || r.offCurve || r.lockMoved || !Number.isFinite(r.ratio));
+  return { ok: rows.length === 17 && !failed.length && rows.some((r) => r.samples > 0),
+           detail: `${rows.length} landings, ${rows.reduce((n, r) => n + r.nodes, 0)} dots, ` +
+             `${rows.reduce((n, r) => n + r.samples, 0)} curve samples; failures ${JSON.stringify(failed)}` };
+}, { on: ["demo-vault", "test-vault"] });
 
 check("only a hop lengthens the trail", async (p) => {
   await settle(p);
@@ -7881,6 +8949,7 @@ check("a live rebuild with the same data moves nothing", async (p) => {
 }, { on: "all" });
 
 // github#120
+// github#151 -- leaves vg.shown: see the note on "word counts land by path"
 check("a rebuild waits for a drag, and a right-click is not a drag", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
@@ -7893,6 +8962,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- refused, and refused FOR THAT REASON
   const held = await p.j(`(function(){ ${EL}
     window.__live.a = window.__live.snap();
+    window.__live.orig = window.__live.clone();
     ${DOWN(0)}
     var res = __vg.applyData(window.__live.withOneMore('__live/Zz Drag Probe.md'));
     var order = __vg.graph.order;
@@ -7908,14 +8978,14 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- a context menu is not a drag
   const rclick = await p.j(`(function(){ ${EL}
     ${DOWN(2)}
-    var res = __vg.applyData(window.__live.clone());
+    var res = __vg.applyData(window.__live.orig);
     ${UP}
     return res;
   })()`);
   await settle(p);
 
   // github#120 -- put the disc back for the other live checks
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
 
   const ok = held.res && held.res.applied === false && held.res.busy === "drag" &&
@@ -7926,7 +8996,8 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
     `held: ${held.res.applied ? "APPLIED (should have waited)" : `refused "${held.res.reason}" busy "${held.res.busy}"`}` +
     `, order while held ${held.orderWhileHeld} (was ${held.before}), after release ${landed}` +
     `; right-click: ${rclick.applied ? `applied "${rclick.reason}"` : `REFUSED "${rclick.busy}" -- a context menu deferred the rebuild`}` };
-}, { on: "all" });
+  // github#151 -- leaves press.vg-legend too: a rebuild builds a new legend
+}, { on: "all", leaves: ["vg.shown", "press.vg-legend"] });
 
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
   const names = await p.j("__vg.invalidations()");
@@ -7944,7 +9015,7 @@ check("a live rebuild lands on the layout a fresh relayout gives", async (p) => 
                                         return { n: window.__live.a.n }; })()`);
   const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
   await settle(p);
-  // decisions/0011, github#21
+  // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest, github#21
   const after = await p.j(`(function(){
     var landed = window.__live.snap();
     __vg.relayout();
@@ -8012,12 +9083,14 @@ check("a live rebuild re-arms the chip, so a note that arrives inside its window
     : `rebuild refused: ${r.reason}` };
 }, { on: "all" });
 
+// github#151 -- leaves vg.shown: the new count is the thing under test
 check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
   const start = await p.j(`window.__live.snap().n`);
   // design/0014
   const r = await p.j(`(function(){
+    window.__live.orig = window.__live.clone();
     var res = __vg.applyData(window.__live.without(1));
     var ids = __vg.graph.nodes(), d = __vg.data();
     var diverged = 0, sample = null;
@@ -8042,7 +9115,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
              missing: __vg.setWords("__live/not a note.md", 1) };
   })()`);
   await settle(p);
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
   const ok = r.res.applied && r.diverged > 0 && r.landed === 424242 &&
              r.bystander !== null && r.bystander !== 424242 && r.missing === false;
@@ -8051,7 +9124,8 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
       `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
       `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
     : `index and id never diverged -- this check cannot see the defect it exists for` };
-}, { on: WALK, clock: "real" });
+  // github#151 -- leaves press.vg-legend too: a rebuild builds a new legend
+}, { on: WALK, clock: "real", leaves: ["vg.shown", "press.vg-legend"] });
 
 // github#142
 check("an idle PNG export carries the graph, not just the background and the logo", async (p) => {
@@ -8067,6 +9141,31 @@ check("an idle PNG export carries the graph, not just the background and the log
   return { ok: pngCarriesGraph(r), detail: pngCaptureDetail(r) };
 });
 
+
+// github#155, decisions/0016 -- a real window resize, never a metrics override
+async function fitViewport(p, want = TUNED_VIEWPORT) {
+  // github#155 -- p.eval, not p.j: p.j is installed after the intro wait
+  const read = async () => JSON.parse(
+    await p.eval("JSON.stringify({ w: innerWidth, h: innerHeight })"));
+  let got = await read().catch(() => null);
+  if (!got) return null;
+  let id = null;
+  try { id = (await p.send("Browser.getWindowForTarget", {})).windowId; }
+  catch { return got; }
+  // github#155 -- a second pass, for a window manager that clamped the first
+  for (let i = 0; i < 2 && got; i++) {
+    let bounds;
+    try { bounds = (await p.send("Browser.getWindowBounds", { windowId: id })).bounds; }
+    catch { return got; }
+    const next = nextBounds(bounds, got, want);
+    if (!next) return got;
+    try { await p.send("Browser.setWindowBounds", { windowId: id, bounds: next }); }
+    catch { return got; }
+    await sleep(250);
+    got = await read().catch(() => got);
+  }
+  return got;
+}
 
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
@@ -8093,7 +9192,7 @@ async function runOne(vault, work) {
   let url = (work && work.url) || arg("url", "");
   let scratch = null;
   if (!url) {
-    scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+    scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
     const b = spawnSync(process.execPath,
                         [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                           .concat(vault ? ["--vault", vault] : []),
@@ -8122,26 +9221,23 @@ async function runOne(vault, work) {
     if (/already serving CDP/.test(e.message)) throw e;
   }
 
-  const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
+  // github#197
+  if (interrupted()) throw new Error("interrupted before this job's browser started");
+  const profile = runDir("vg-smoke-");
   // github#129
-  const focus = await keepFocus();
-  const chrome = spawn(chromeExe(), [
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check",
-    "--disable-extensions", "--disable-component-update", "--disable-client-side-phishing-detection",
-    "--disable-sync", "--no-service-autorun", "--disable-domain-reliability",
-    "--metrics-recording-only", "--no-pings", "--mute-audio",
-    "--disable-breakpad", "--disable-crash-reporter",
-    // github#7
-    "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling",
-    ...(slot ? [`--window-position=${slot.x},${slot.y}`]
-             : HEADED ? [] : [leftWindowPos()]),
-    slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
-  ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
-  void focus.watch(chrome.pid);
+  // github#155 -- no window ever takes the keyboard, so nothing to hand back
+  const focus = HEADLESS ? null : await keepFocus();
+  // github#155 -- the flag list lives in smoke-shape.mjs, where it is asserted
+  const chrome = spawn(chromeExe(), chromeArgs({
+    url, port: PORT, profile, headless: HEADLESS,
+    windowPos: slot ? `--window-position=${slot.x},${slot.y}`
+             : (HEADED || HEADLESS) ? null : leftWindowPos(),
+    windowSize: slot ? `${slot.w},${slot.h}` : "1600,1000",
+  }), { stdio: ["ignore", "ignore", "pipe"], detached: false });
+  if (focus) void focus.watch(chrome.pid);
+  // github#197
+  const lane = { chrome, port: PORT, profile };
+  LANES.add(lane);
 
   const chromeSaid = [];
   if (chrome.stderr) {
@@ -8165,6 +9261,16 @@ async function runOne(vault, work) {
       try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
+    // github#186, github#192 -- only a window this run placed on the hook's screen
+    if (process.platform === "win32" && !slot && !HEADED && !HEADLESS) {
+      const { bounds } = await page.send("Browser.getWindowForTarget");
+      const screen = harnessScreen();
+      if (bounds.left < screen.x || bounds.top < screen.y ||
+          bounds.left + bounds.width > screen.x + screen.w || bounds.top + bounds.height > screen.y + screen.h) {
+        throw new Error("Chrome is outside the claimed screen: " + JSON.stringify(bounds));
+      }
+      log("Chrome bounds verified on the claimed screen: " + JSON.stringify(bounds));
+    }
     // github#104
     if (!BROWSER) { try { BROWSER = (await json(PORT, "/json/version")).Browser; } catch { void 0; } }
     // github#146 -- the list the checks see, and may edit
@@ -8183,6 +9289,17 @@ async function runOne(vault, work) {
       );
     }
 
+    // github#155 -- the frame, before the intro lands in it
+    if (HEADLESS) {
+      const saw = await fitViewport(page).catch(() => null);
+      if (!saw || saw.w !== TUNED_VIEWPORT.w || saw.h !== TUNED_VIEWPORT.h) {
+        // github#155 -- said, never silently tolerated
+        log(`  ! headless viewport is ${saw ? saw.w + "x" + saw.h : "unreadable"}, not ` +
+            `${TUNED_VIEWPORT.w}x${TUNED_VIEWPORT.h} -- frame-relative checks measure a ` +
+            `different stage than the thresholds were tuned in`);
+      }
+    }
+
     const ready = Date.now() + 30000;
     for (;;) {
       const ok = await page.eval("!!(window.__vg && __vg.heat && __vg.state.until === null)").catch(() => false);
@@ -8191,7 +9308,9 @@ async function runOne(vault, work) {
       await sleep(300);
     }
 
-    page.j = async (expr) => JSON.parse(await page.eval(`JSON.stringify(${expr})`));
+    // github#151 -- await the expression before stringifying it
+    page.j = async (expr) =>
+      JSON.parse(await page.eval(`(async function () { return JSON.stringify(await (${expr})); })()`));
 
     // github#7
     // github#63
@@ -8223,26 +9342,36 @@ async function runOne(vault, work) {
     await settle(page, 20000);
 
     // github#146
-    const { failed, ran, timings } = await runChecks({
+    const { failed, ran, timings, audit } = await runChecks({
       checks: mine, page, ctx, log, settle,
       chromeState: () => ({ gone: chromeGone, said: chromeSaid }),
-      fastClock: FAST_CLOCK, nativeClock
+      // github#151
+      fastClock: FAST_CLOCK, nativeClock, stateAudit: !!AUDIT, stateBoundary: BOUNDARY
     });
 
     const total = timings.reduce((a, t) => a + t.ms, 0);
     const slow = timings.slice().sort((a, b) => b.ms - a.ms).slice(0, 5);
     log(`\n${ran - failed}/${ran} passed in ${(total / 1000).toFixed(0)}s`);
     log("slowest: " + slow.map((t) => `${t.name} ${(t.ms / 1000).toFixed(1)}s`).join(", "));
-    return { failed, ran, lines, timings };
+    return { failed, ran, lines, timings, audit };
   } finally {
     try { if (page) await page.send("Browser.close"); } catch { }
     if (page) page.close();
 
     await killBrowser(chrome, PORT);
-    try { rmSync(profile, { recursive: true, force: true }); } catch {}
-    if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
+    // github#197
+    await exited(chrome, 5000);
+    removeDir(profile);
+    LANES.delete(lane);
+    if (scratch) removeDir(dirname(scratch));
   }
 }
+
+// github#197
+/** @type {Set<{ chrome: import("node:child_process").ChildProcess, port: number, profile: string }>} */
+const LANES = new Set();
+/** @type {string[]} */
+const BUILDS = [];
 
 // github#7
 async function killBrowser(child, PORT) {
@@ -8339,17 +9468,17 @@ async function killBrowser(child, PORT) {
  * reuses. A leftover fixture directory in a checkout root is ignored with a one-line notice;
  * --vault remains the explicit override for pointing the suite at any vault on purpose.
  *
- * EXCEPT THE 10k VAULT, WHOSE --end IS PINNED. Its golden layout snapshot is not
- * day-invariant: the daily notes there are filed into year-month subfolders derived from
- * their dates, so moving --end moves notes between subfolders, and the subfolder cells move
- * with them. Measured 2026-09-04, the first weekly refresh after the goldens were recorded:
- * the regenerated 10k vault failed "layout matches its golden snapshot" with 893 notes moved
- * (worst #5296, radius 9317 -> 9637, angle -80 -> 169 degrees) on develop itself, while the
- * demo and shape vaults -- which have no date-derived folders -- stayed byte-identical, as
- * invariants.md had measured for those two. So the 10k is generated with --end fixed at the
- * day its golden was taken, and a pinned fixture does not age (there is nothing for a weekly
- * refresh to change). It costs the 10k vault the live half of the heatmap-window check,
- * which the two ageing vaults still carry.
+ * EXCEPT THE 10k AND DEMO VAULTS, WHOSE --end IS PINNED. Their goldens are not day-invariant:
+ * daily notes are named by date and filed into year-month subfolders, so moving --end renames
+ * and refiles them, and the subfolder cells move with them. Measured 2026-09-04: the 10k
+ * failed "layout matches its golden snapshot" with 893 notes moved on develop itself. The
+ * demo vault delegates to the same generator and was assumed safe; measured 2026-09-29 (github
+ * #186), its golden holds for --end 09-20 to 09-22, moves 3 notes at 09-23 and 31 at 09-27.
+ * The shape vault has no date-derived folders and still ages, so it carries the live window.
+ * So both are generated with --end fixed at a day their goldens hold, and a pinned fixture
+ * does not age (there is nothing for a weekly refresh to change). It costs both the live
+ * half of the heatmap-window check,
+ * which the shape vault still carries.
  *
  * github#106, decisions/0013 -- a stamp is not proof the vault is usable
  *
@@ -8371,29 +9500,17 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  // github#71 -- the trio share one list, by delegation
-  const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
   // github#71 -- delegates to nothing, so it gets its OWN list
   const SPEC_GENERATORS = ["make-spec-vault.mjs"];
-  // github#106 -- format 2 stamps the note count
-  const FIXTURE_FORMAT = 2;
   const storeRoot = fixtureStore(ROOT);
-
-  const digestOf = (args, gens) => {
-    const h = createHash("sha256");
-    h.update("format:" + FIXTURE_FORMAT);
-    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
-    h.update(JSON.stringify(args));
-    return h.digest("hex").slice(0, 8);
-  };
 
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
   const gen = (script, args, name, label, gens) => {
-    const digest = digestOf(args, gens);
+    const digest = fixtureDigest(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -8426,9 +9543,7 @@ function resolveVaults() {
         return;
       }
       // github#106 -- counted, then checked before it is published
-      writeFileSync(join(building, ".stamp.json"),
-                    JSON.stringify({ digest, day: todayDay(), script, args, notes: countNotes(building) },
-                                   null, 2) + "\n");
+      stampFixture(building, { digest, script, args, notes: countNotes(building) });
       const built = checkFixture(building);
       if (!built.ok) {
         console.log(`  cannot generate ${label}: ${built.why}`);
@@ -8450,7 +9565,8 @@ function resolveVaults() {
     out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
-  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
+  // github#199, github#186
+  gen("make-demo-vault.mjs", ["--end", "2026-09-22"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
@@ -8467,7 +9583,8 @@ function resolveVaults() {
 
 async function buildFor(v) {
   if (arg("url", "")) return "";
-  const scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+  const scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
+  BUILDS.push(dirname(scratch));
   const b = spawnSync(process.execPath,
                       [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                         .concat(v.path ? ["--vault", v.path] : [])
@@ -8487,20 +9604,31 @@ async function buildFor(v) {
 
 async function main() {
   const picked = selected();
-  if (ONLY.length && !picked.length) {
-    throw new Error(`--only ${ONLY.join(", ")} matched none of the ${all.length} checks`);
+  // github#155 -- say which filter emptied the set, not just --only
+  if ((ONLY.length || LANE !== "all") && !picked.length) {
+    const how = [ONLY.length ? `--only ${ONLY.join(", ")}` : "", LANE !== "all" ? `--lane ${LANE}` : ""]
+      .filter(Boolean).join(" with ");
+    throw new Error(`${how} matched none of the ${all.length} checks`);
+  }
+  // github#155 -- the lane is part of what this run is
+  if (LANE !== "all") {
+    const fast = all.filter((c) => c.clock !== "real").length;
+    console.log(`--lane ${LANE}: ${LANE === "fast" ? fast : all.length - fast} of ${all.length} ` +
+                `checks run on the ${LANE === "fast" ? "fast" : "real"} clock`);
   }
   if (ONLY.length) {
     console.log(`--only: ${picked.length} of ${all.length} checks -- ` +
                 picked.map((c) => c.name).join("; "));
-    console.log("");
   }
+  if (ONLY.length || LANE !== "all") console.log("");
   // github#104 -- captured before anything is built from it
   const builtFrom = startRun(ROOT);
   const vaults = resolveVaults();
-  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}`);
+  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}` +
+              // github#155 -- a run that took no screen lock says so
+              (HEADLESS ? " -- headless, no window placed and no screen lock taken" : ""));
 
-  const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(JOBS, 1));
+  const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(WIDTH, 1));
 
   // github#113
   const jobs = [];
@@ -8513,9 +9641,9 @@ async function main() {
     const intro = mine.filter(needsIntro);
     // github#79
     const pristine = mine.filter(needsPristine);
-    // github#113
-    const walk = JOBS > 1 ? rest.filter((c) => c.clock === "real") : [];
-    const fast = JOBS > 1 ? rest.filter((c) => c.clock !== "real") : rest;
+    // github#113, github#101
+    const walk = WIDTH > 1 ? rest.filter((c) => c.clock === "real") : [];
+    const fast = WIDTH > 1 ? rest.filter((c) => c.clock !== "real") : rest;
     if (walk.length) jobs.push({ vault: v, checks: walk, tag: v.label + " (walk)", url: atRest, walk: true });
     if (fast.length) jobs.push({ vault: v, checks: fast, tag: v.label, url: atRest });
     if (intro.length) jobs.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
@@ -8537,12 +9665,16 @@ async function main() {
   const ran = new Map();
   // github#113
   const timingsOut = [];
+  // github#151
+  const auditsOut = [];
   const bump = (work, r) => {
     const label = work.vault.label;
     failures.set(label, (failures.get(label) || 0) + r.failed);
     ran.set(label, (ran.get(label) || 0) + r.ran);
     const fixture = work.vault.fixture ? work.vault.fixture.name : label;
     for (const t of r.timings || []) timingsOut.push({ fixture, check: t.name, ms: t.ms });
+    // github#151
+    if (r.audit) auditsOut.push({ job: work.tag, fixture, ...r.audit });
   };
   const report = (work, r) => {
     console.log("=".repeat(72));
@@ -8552,17 +9684,27 @@ async function main() {
     console.log("");
   };
 
-  // github#113
+  // github#198
+  const gate = admission("smoke", SCREEN_OWNER, Math.min(WIDTH, jobs.length));
+
+  // github#113, github#101
   const pool = async (list, width) => {
     const walks = list.filter((j) => j.walk), fasts = list.filter((j) => !j.walk);
-    let walkBusy = false;
+    const walkWidth = Math.max(1, Math.min(SERIAL_JOBS, width));
+    let walkRunning = 0;
     const worker = async (lane) => {
       for (;;) {
+        const walkNext = walkRunning < walkWidth && walks.length > 0;
+        if (!walkNext && !fasts.length) {
+          if (!walks.length) return;
+          await sleep(500); continue;
+        }
+        // github#198 -- asked between jobs only, never inside one
+        if (!(await gate.enter(walkNext ? "walk" : "fast"))) continue;
         let w = null;
-        if (!walkBusy && walks.length) { w = walks.shift(); walkBusy = true; }
+        if (walkRunning < walkWidth && walks.length) { w = walks.shift(); walkRunning++; }
         else if (fasts.length) w = fasts.shift();
-        else if (walks.length) { await sleep(500); continue; }
-        else return;
+        else { gate.leave(); continue; }
         w = { ...w, slot: lane, slots: Math.min(width, list.length), port: lanePorts[lane] || 0 };
         let r;
         try { r = await runOne(w.vault.path, w); }
@@ -8570,7 +9712,8 @@ async function main() {
           r = { failed: w.checks.length, ran: w.checks.length,
                 lines: ["  !! this job did not run: " + e.message], timings: [] };
         }
-        if (w.walk) walkBusy = false;
+        if (w.walk) walkRunning--;
+        gate.leave();
         report(w, r);
         bump(w, r);
       }
@@ -8578,12 +9721,14 @@ async function main() {
     await Promise.all(Array.from({ length: Math.min(width, list.length) }, (_, lane) => worker(lane)));
   };
 
-  if (JOBS > 1) {
-    console.log(`${JOBS} lanes: ${jobs.filter((j) => j.walk).length} walk job(s) one at a time, ` +
+  if (WIDTH > 1) {
+    const walkWidth = Math.max(1, Math.min(SERIAL_JOBS, WIDTH));
+    console.log(`${WIDTH} lane(s), serial pool width ${SERIAL_JOBS}: ` +
+                `${jobs.filter((j) => j.walk).length} walk job(s) up to ${walkWidth} at once, ` +
                 `${jobs.filter((j) => !j.walk).length} other job(s) beside them`);
   }
   const started = Date.now();
-  await pool(jobs, JOBS);
+  await pool(jobs, WIDTH);
   const wall = Math.round((Date.now() - started) / 1000);
   if (arg("timings", "")) {
     writeFileSync(arg("timings", ""), JSON.stringify({ at: new Date().toISOString(), wallSec: wall,
@@ -8591,29 +9736,85 @@ async function main() {
     console.log(`wrote ${timingsOut.length} timings to ${arg("timings", "")}`);
   }
 
+  // github#151 -- the audit file is the record; the summary is printed
+  if (AUDIT && auditsOut.length) {
+    writeFileSync(AUDIT, JSON.stringify({ at: new Date().toISOString(), jobs: auditsOut }, null, 1) + "\n");
+    const bar = "=".repeat(72);
+    console.log(bar);
+    console.log("== state audit -- what each check left behind, and what the next one could read");
+    console.log(bar);
+    let leakN = 0, coupN = 0, probeMs = 0, probeN = 0;
+    for (const jb of auditsOut) {
+      const all = leakReport(jb);
+      const leaks = all.filter((l) => l.keys.length);
+      const declared = all.filter((l) => l.declared.length);
+      const coupled = couplingReport(jb);
+      leakN += leaks.length; coupN += coupled.length;
+      for (const r of jb.rows) { probeMs += r.ms; probeN++; }
+      console.log("");
+      console.log(`-- ${jb.job}: ${jb.rows.length} checks, ` +
+                  `${Object.keys(jb.base).length} state keys, ` +
+                  `${leaks.length} check(s) left the page off baseline, ` +
+                  `${declared.length} declared, ` +
+                  `${coupled.length} inherited-state read(s)`);
+      for (const l of leaks) {
+        console.log(`   left:  ${l.check}`);
+        console.log(`            ${l.keys.join(", ")}`);
+      }
+      for (const l of declared) {
+        console.log(`   says:  ${l.check}`);
+        console.log(`            ${l.declared.join(", ")}`);
+      }
+      /** @type {Map<string, string[]>} */
+      const byCheck = new Map();
+      for (const c of coupled) {
+        if (!byCheck.has(c.check)) byCheck.set(c.check, []);
+        (byCheck.get(c.check) || []).push(`${c.key} (left by ${c.leftBy})`);
+      }
+      for (const [name, list] of byCheck) {
+        console.log(`   reads: ${name}`);
+        for (const one of list) console.log(`            ${one}`);
+      }
+    }
+    console.log("");
+    console.log(`wrote ${auditsOut.length} job audit(s) to ${AUDIT}`);
+    console.log(`${leakN} leak(s), ${coupN} inherited read(s); ` +
+                `the probe cost ${(probeMs / 1000).toFixed(1)}s over ${probeN} check(s)`);
+  }
+
   let worst = 0;
   for (const v of vaults) worst = Math.max(worst, failures.get(v.label) || 0);
 
-  if (vaults.length > 1 || JOBS > 1) {
+  if (vaults.length > 1 || WIDTH > 1) {
     console.log(`${"=".repeat(72)}`);
     for (const v of vaults) {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
-    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)`);
+    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)` +
+                (gate.heard() ? `, at most ${gate.peak} at once under the harness hook` : ""));
   }
 
   // github#93, decisions/0013
   // github#104 -- named first: a changed shape invalidates the measurement
-  const deltas = shapeDeltas({ jobs: JOBS, grid: GRID, headed: HEADED, port: PINNED_PORT,
-                               chrome: arg("chrome", "") });
+  const deltas = shapeDeltas({ jobs: JOBS, serialJobs: SERIAL_JOBS, grid: GRID, headed: HEADED,
+                               // github#155
+                               headless: HEADLESS, lane: LANE,
+                               port: PINNED_PORT, chrome: arg("chrome", "") });
   const notFull = (what) => `${what} is not the full suite`;
+  // github#198
+  if (gate.narrowest < Math.min(WIDTH, jobs.length)) {
+    deltas.push(`the harness hook's width ${gate.narrowest} (planned ${Math.min(WIDTH, jobs.length)})`);
+  }
   const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
                 : ONLY.length ? notFull("--only")
                 : argAll("vault").length ? notFull("--vault")
                 : arg("url", "") ? notFull("--url")
                 : vaults.some((v) => !v.fixture) ? notFull("an unstamped fixture")
                 // github#106
+                // github#151
+                : AUDIT ? notFull("--audit-state")
+                : !BOUNDARY ? notFull("--no-state-boundary")
                 : process.env.VG_FIXTURE_STORE ? notFull("VG_FIXTURE_STORE")
                 // github#103
                 : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n))
@@ -8636,8 +9837,7 @@ async function main() {
   return worst ? 1 : 0;
 }
 
-// github#87
-const SCREEN_LOCK = "screen-left";
+// github#87, github#192
 const SCREEN_OWNER = (() => {
   let branch = "?";
   try {
@@ -8648,39 +9848,39 @@ const SCREEN_OWNER = (() => {
   return "smoke.mjs " + branch + " [" + process.pid + "]";
 })();
 
-// github#87
 function takeScreen() {
-  if (NO_LOCK) return false;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("");
-    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
-    console.error("display, and two runs on one screen spoil each other's captures and timings.");
-    console.error("Who holds it:  node scripts/lock.mjs status");
-    console.error("Pass --no-lock ONLY when the caller already holds it.");
-    process.exit(1);
-  }
-  return true;
+  // github#155 -- a headless run is on no screen
+  if (HEADLESS) return null;
+  const s = claimScreen(SCREEN_OWNER);
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
+  return s.lock;
 }
 
-// github#87
-function dropScreen(held) {
-  if (!held) return;
-  try {
-    spawnSync(process.execPath,
-      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-      { stdio: "ignore" });
-  } catch { void 0; }
-}
+/** @param {string | null} held */
+function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 const heldScreen = takeScreen();
-for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(sig, () => { dropScreen(heldScreen); process.exit(1); });
+// github#197
+const tidy = () => { for (const b of BUILDS.splice(0)) removeDir(b); };
+onInterrupt(() => { dropScreen(heldScreen); tidy(); }, { code: 1 });
+onInterrupt(async () => {
+  const lanes = [...LANES];
+  await Promise.all(lanes.map(async (l) => {
+    await killBrowser(l.chrome, l.port);
+    await exited(l.chrome, 1500);
+    removeDir(l.profile);
+  }));
+});
+{
+  const r = reapStale({ budgetMs: 1000 });
+  if (r.killed || r.removed) {
+    console.log(`reaped ${r.killed} browser(s) and ${r.removed} temp dir(s) left by runs that are gone` +
+                (r.left ? `, ${r.left} more next run` : ""));
+  }
 }
-main().then((code) => { dropScreen(heldScreen); process.exit(code); }).catch((e) => {
+main().then((code) => { dropScreen(heldScreen); tidy(); process.exit(code); }).catch((e) => {
   dropScreen(heldScreen);
+  tidy();
   console.error("smoke failed to run:", e.message);
   process.exit(1);
 });

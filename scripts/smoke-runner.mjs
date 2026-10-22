@@ -1,6 +1,8 @@
 // github#146 -- the smoke loop, and the error audit around every check
 
 import { errorText } from "./cdp.mjs";
+import { readState, diffState, keysRead, allowedToLeave, newLeaks,
+         readable } from "./smoke-state.mjs";
 
 /**
  * @param {string[]} errs
@@ -40,14 +42,46 @@ async function drain(page) {
   try { await page.eval("1"); return ""; } catch (e) { return e.message || "no reply"; }
 }
 
+// github#151 -- the audit, off unless asked for
+function makeAudit(page) {
+  /** @type {string[]} */
+  let exprs = [];
+  let on = false;
+  // github#151 -- the original reference, so release() restores it
+  const real = page.eval;
+  page.eval = (expr) => { if (on) exprs.push(String(expr)); return real.call(page, expr); };
+  return {
+    // github#151 -- the probe's own read is not the check's
+    open() { exprs = []; on = true; },
+    close() { on = false; return exprs.slice(); },
+    release() { page.eval = real; }
+  };
+}
+
 /**
- * github#146, github#112, github#113
- * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[] }>}
+ * github#146, github#112, github#113, github#151
+ * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[], audit: { base: Record<string, string>, rows: object[] } | null }>}
  */
 export async function runChecks(opts) {
   const { checks, page, ctx, log, settle, chromeState, fastClock, nativeClock } = opts;
+  // github#151 -- audit reports, boundary refuses; both need the probe
+  const auditing = !!opts.stateAudit;
+  const bounding = !!opts.stateBoundary;
+  const watching = auditing || bounding;
+  const audit = watching ? makeAudit(page) : null;
+  /** @type {{ name: string, changed: object[], dirty: object[], reads: string[], ms: number }[]} */
+  const auditRows = [];
+  let baseState = null, prevState = null;
+  if (watching) { baseState = await readState(page); prevState = baseState; }
   // github#146 -- only the last window pays for a grace
   const finalGraceMs = opts.finalGraceMs === undefined ? 500 : opts.finalGraceMs;
+  // github#186 -- Chrome 153 headless defaults to reduce
+  await page.send("Emulation.setEmulatedMedia",
+                  { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }).catch(() => {});
+  if (await page.eval(`matchMedia("(prefers-reduced-motion: reduce)").matches`).catch(() => false)) {
+    throw new Error("this Chrome reports prefers-reduced-motion: reduce and would not let it be emulated away -- " +
+                    "every animation check would pass against a snap");
+  }
 
   const chromeTail = () => {
     const said = chromeState ? chromeState() : null;
@@ -96,6 +130,7 @@ export async function runChecks(opts) {
                       { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }).catch(() => {});
       await page.eval(`__vg.timeScale = ${fastClock}; void 0`).catch(() => {});
     }
+    if (audit) audit.open();
     try { r = await c.fn(page, ctx); }
     catch (e) { r = { ok: false, detail: "threw: " + e.message }; }
     // github#113, github#112
@@ -110,10 +145,35 @@ export async function runChecks(opts) {
     }
     if (fast) {
       await page.eval(`__vg.timeScale = ${nativeClock}; void 0`).catch(() => {});
-      await page.send("Emulation.setEmulatedMedia", { features: [] }).catch(() => {});
+      // github#186 -- an empty list restores Chrome's own default
+      await page.send("Emulation.setEmulatedMedia",
+                      { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }).catch(() => {});
     }
     // github#146 -- the window closes after the interaction's tail
     await quiet(page);
+    // github#151 -- sampled on the error window's own boundary
+    if (audit) {
+      const exprs = audit.close();
+      const t1 = Date.now();
+      const now = await readState(page);
+      if (auditing) {
+        auditRows.push({ name: c.name, changed: diffState(prevState, now),
+                         dirty: diffState(baseState, now), reads: keysRead(baseState, exprs),
+                         // github#151 -- so the report can tell a leak from a declaration
+                         leaves: c.leaves || null, ms: Date.now() - t1 });
+      }
+      // github#151 -- off the job's baseline, minus what it declared
+      if (bounding && readable(baseState) && readable(prevState) && readable(now)) {
+        const leaked = newLeaks(baseState, prevState, now)
+                         .filter((d) => !allowedToLeave(d.key, c.leaves));
+        if (leaked.length) {
+          r = { ok: false,
+                detail: `${r.detail || ""} | left the page off its baseline: ` +
+                        leaked.map((d) => `${d.key} ${d.from} -> ${d.to}`).join(", ") };
+        }
+      }
+      prevState = now;
+    }
     // github#146 -- a splice below the mark hid something unaudited
     if (ctx.errors.length < mark) mark = 0;
     const fresh = ctx.errors.slice(mark);
@@ -142,5 +202,8 @@ export async function runChecks(opts) {
         `         ${late.length} error(s) nothing accounted for: ${summarise(late)}`);
   }
 
-  return { failed, ran: checks.length + (late.length ? 1 : 0), timings };
+  if (audit) audit.release();
+  return { failed, ran: checks.length + (late.length ? 1 : 0), timings,
+           // github#151
+           audit: auditing ? { base: baseState, rows: auditRows } : null };
 }

@@ -1,11 +1,14 @@
 // github#145 -- the compiler's check on the JavaScript, and its probe
-// github#145 -- 1. tsconfig.contracts.json must report ZERO diagnostics
+// github#156 -- two programs now, browser and node, each with its own probe
+// github#145 -- 1. both configs must report ZERO diagnostics
 // github#145 -- 2. a copy of src/page.js with `var DATA = 42` must NOT
-// github#145 -- the probe's config extends the real one; rebuilding its
+// github#156 -- 3. a copy of src/build-graph.mjs with `nodes: 42` must NOT
+// github#145 -- a probe's config extends the real one; rebuilding its
 // github#145 -- options inline passed with checkJs OFF -- measured
 // github#145 -- `files` beats `include`, not `exclude`, so --listFiles
-// github#145 -- asserts the two files are really in the program
+// github#145 -- asserts the named files are really in the program
 // github#145 -- zero, not a baseline; diagnostics print by identity
+// github#156 -- src/page.js is in both programs, so they are deduped
 // github#145 -- .ai-context/invariants.md has why
 
 import { spawnSync } from "node:child_process";
@@ -16,12 +19,40 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
 
-// github#145 -- gitignored; removed in a finally and on the way in
-const PROBE_JS = join(ROOT, "src", "vg-contract-probe.js");
-const PROBE_CFG = join(ROOT, "tsconfig.probe.json");
+// github#145, github#156 -- the two real programs; covers is what --listFiles proves
+const PROGRAMS = [
+  { config: "tsconfig.contracts.json", covers: ["src/page.js", "plugin/main.js"] },
+  { config: "tsconfig.contracts-node.json", covers: ["src/build-graph.mjs"] },
+];
 
-const ANCHOR = "var DATA = data;";
-const MUTANT = '/** @type {VaultData} */ var DATA = 42;';
+// github#145, github#156 -- one probe per program: each config has its own checkJs
+const PROBES = [
+  {
+    label: "page",
+    source: "src/page.js",
+    copy: "src/vg-contract-probe.js",
+    config: "tsconfig.probe.json",
+    extends: "./tsconfig.contracts.json",
+    anchor: "var DATA = data;",
+    mutant: '/** @type {VaultData} */ var DATA = 42;',
+    binds: "the VaultData argument",
+    expect: /VaultData/,
+  },
+  {
+    label: "exporter",
+    source: "src/build-graph.mjs",
+    copy: "src/vg-exporter-probe.mjs",
+    config: "tsconfig.exporter-probe.json",
+    extends: "./tsconfig.contracts-node.json",
+    anchor: "\n  nodes,\n  edges,\n",
+    mutant: "\n  nodes: 42,\n  edges,\n",
+    binds: "the VaultData the exporter emits",
+    expect: /VaultNode|VaultData/,
+  },
+];
+
+// github#145, github#156 -- gitignored; removed in a finally and on the way in
+const ARTEFACTS = PROBES.flatMap((p) => [join(ROOT, p.copy), join(ROOT, p.config)]);
 
 /** github#145 -- `path(line,col): error TSxxxx: message` */
 const DIAG = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
@@ -45,7 +76,7 @@ function runTsc(project, listFiles) {
 }
 
 function cleanup() {
-  for (const f of [PROBE_JS, PROBE_CFG]) rmSync(f, { force: true });
+  for (const f of ARTEFACTS) rmSync(f, { force: true });
 }
 
 let failed = false;
@@ -56,26 +87,40 @@ try {
     process.exit(1);
   }
 
-  /* ---------------------------------------------------------- the real check */
+  /* ---------------------------------------------------------- the real checks */
 
-  const real = runTsc(join(ROOT, "tsconfig.contracts.json"), true);
-
-  // github#145 -- a file out of the program reports zero for a dull reason
+  // github#156 -- src/page.js is in both programs; a diagnostic can repeat
+  const seen = new Set();
+  /** @type {{ file: string, line: number, col: number, code: string, message: string }[]} */
+  const diags = [];
   const covers = [];
-  for (const want of ["src/page.js", "plugin/main.js"]) {
-    if (real.files.some((f) => f.endsWith("/" + want))) covers.push(want);
-    else {
-      failed = true;
-      console.log(`js-contracts: FAIL -- ${want} is not in the program tsconfig.contracts.json`);
-      console.log("  builds. Its diagnostics are zero because nothing is reading it.");
+
+  for (const program of PROGRAMS) {
+    const real = runTsc(join(ROOT, program.config), true);
+
+    // github#145 -- a file out of the program reports zero for a dull reason
+    for (const want of program.covers) {
+      if (real.files.some((f) => f.endsWith("/" + want))) covers.push(want);
+      else {
+        failed = true;
+        console.log(`js-contracts: FAIL -- ${want} is not in the program ${program.config}`);
+        console.log("  builds. Its diagnostics are zero because nothing is reading it.");
+      }
+    }
+
+    for (const d of real.diags) {
+      const key = `${d.file}(${d.line},${d.col}) ${d.code} ${d.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      diags.push(d);
     }
   }
 
-  if (real.diags.length) {
+  if (diags.length) {
     failed = true;
-    console.log(`js-contracts: FAIL -- ${real.diags.length} diagnostic(s) with checkJs on\n`);
+    console.log(`js-contracts: FAIL -- ${diags.length} diagnostic(s) with checkJs on\n`);
     // github#145 -- by identity, never by total
-    for (const d of real.diags) {
+    for (const d of diags) {
       console.log(`  ${d.file}(${d.line},${d.col})  ${d.code}  ${d.message}`);
     }
     console.log("\n  Fix them at their source. A broad cast, an `any` or an exclusion puts the");
@@ -85,35 +130,40 @@ try {
     console.log(`js-contracts: ok -- 0 diagnostics with checkJs on (${covers.join(", ") || "nothing in scope"})`);
   }
 
-  /* ------------------------------------------------------------- the probe */
+  /* ------------------------------------------------------------- the probes */
 
-  const page = readFileSync(join(ROOT, "src", "page.js"), "utf8");
-  const hits = page.split(ANCHOR).length - 1;
-  if (hits !== 1) {
-    // github#145 -- a probe testing nothing is the failure this prevents
-    failed = true;
-    console.log(`js-contracts: FAIL -- the probe's anchor \`${ANCHOR}\` matched ${hits} times in`);
-    console.log("  src/page.js, not once. Re-point it at whatever now binds the VaultData");
-    console.log("  argument, or the acceptance test for github#145 is measuring nothing.");
-  } else {
-    writeFileSync(PROBE_JS, page.replace(ANCHOR, MUTANT), "utf8");
+  for (const probe of PROBES) {
+    const src = readFileSync(join(ROOT, probe.source), "utf8");
+    const hits = src.split(probe.anchor).length - 1;
+    if (hits !== 1) {
+      // github#145 -- a probe testing nothing is the failure this prevents
+      failed = true;
+      const shown = JSON.stringify(probe.anchor);
+      console.log(`js-contracts: FAIL -- the ${probe.label} probe's anchor ${shown} matched`);
+      console.log(`  ${hits} times in ${probe.source}, not once. Re-point it at whatever now binds`);
+      console.log(`  ${probe.binds}, or the acceptance test for it is measuring nothing.`);
+      continue;
+    }
+
+    writeFileSync(join(ROOT, probe.copy), src.replace(probe.anchor, probe.mutant), "utf8");
     // github#145 -- the mutated file alone is the whole program
-    writeFileSync(PROBE_CFG, JSON.stringify({
-      extends: "./tsconfig.contracts.json",
-      files: ["src/vg-contract-probe.js", "src/globals.d.ts"],
+    writeFileSync(join(ROOT, probe.config), JSON.stringify({
+      extends: probe.extends,
+      files: [probe.copy, "src/globals.d.ts"],
     }, null, 2) + "\n", "utf8");
 
-    const probe = runTsc(PROBE_CFG);
-    const caught = probe.diags.filter((d) => /VaultData/.test(d.message));
+    const run = runTsc(join(ROOT, probe.config));
+    const caught = run.diags.filter((d) => probe.expect.test(d.message));
     if (caught.length) {
-      console.log(`js-contracts: ok -- the probe is rejected (${caught[0].code}: ${caught[0].message})`);
+      console.log(`js-contracts: ok -- the ${probe.label} probe is rejected (${caught[0].code}: ${caught[0].message})`);
     } else {
       failed = true;
-      console.log("js-contracts: FAIL -- the probe was NOT rejected.");
-      console.log(`  A copy of src/page.js with \`${MUTANT}\` drew no VaultData diagnostic,`);
-      console.log("  which is what the whole gate did before github#145. Something has turned");
-      console.log("  the check off: checkJs, the include, or an exclusion over src/page.js.");
-      if (probe.raw.trim()) console.log("\n" + probe.raw.trim());
+      console.log(`js-contracts: FAIL -- the ${probe.label} probe was NOT rejected.`);
+      console.log(`  A copy of ${probe.source} with ${JSON.stringify(probe.mutant.trim())} drew no`);
+      console.log("  diagnostic naming the type it violates, which is what the whole gate did");
+      console.log("  before github#145. Something has turned the check off: checkJs, the include,");
+      console.log(`  the types, or an exclusion over ${probe.source}.`);
+      if (run.raw.trim()) console.log("\n" + run.raw.trim());
     }
   }
 } finally {

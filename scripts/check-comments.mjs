@@ -12,8 +12,8 @@ const DIRS = ["plugin", "src", "scripts"];
 const JS_EXT = /\.(m?js|ts)$/;
 const CSS_EXT = /\.css$/;
 
-// github#61, github#174
-const BASELINE = 378;
+// github#61, github#174, github#188
+const BASELINE = 350;
 
 const VERBOSE = argv.includes("--verbose");
 const LIST = argv.includes("--list");

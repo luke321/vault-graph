@@ -1,5 +1,142 @@
 # Invariants
 
+## Hidden defaults are outside the layout baseline (github#186)
+
+Folders or tag groups hidden in settings, including the underscore default, contribute no
+members or links to the starting disc's geometry, seam-count scaling, degree ramp, or serpentine ordering.
+Their data remains available to the legend and can be shown again. A note connected only to
+those groups is unlinked in the visible baseline. Hiding a filing also hides its unlinked notes.
+
+The geometry lock and resting-size reference describe this baseline, rather than every note
+the producer returned. Temporary legend and date filters still repack inside the locked rings
+and retain the existing resting-size bounds. The baseline calculation clears those temporary
+filters while retaining saved hidden defaults. Changing a saved default invalidates degree,
+rank and resting-size caches and retakes the geometry; standalone Refresh retakes it too.
+Link ranking uses the full adjacency list, not the subset of edges submitted to the renderer.
+
+The focused checks `hidden defaults do not change` add 320 synthetic hidden notes and 640
+incident edges, then compare visible positions, band membership and dot radii with the original
+graph. They cover mounting, Refresh, revealing the added groups and hiding them again, with
+ordinary and reduced motion. Reduced-motion Refresh must leave no playing state behind.
+The reference remains stored in graph units so a viewport resize cannot alter its meaning.
+
+## Parallel Refresh on a dimension switch (github#186)
+
+Sizing resolves each adjacent note to its display node in the arriving disc. A temporary
+stand-in keeps its note's link count, including self-link weighting, and sees the arriving
+stand-ins of its neighbours. The departing originals being hidden in this world must not
+zero that score. Before taking the settled size baseline, transfer and remove stand-ins,
+recompute visible-link ranks for the real nodes, and lay out the destination. A fresh alpha
+sync and relayout after the switch must change neither the size rank nor the dot size.
+`tags: parallel Refresh preserves link-based sizes` checks incoming ranks against an instant
+destination and settled sizes against a fresh recalculation, in both directions on four fixtures.
+
+The folder/tag switch runs the leaving disc's Refresh backwards and the destination's
+Refresh forwards over the same `TIMELINE_MS * TIME_SCALE` clock. Departure reverses the
+date order; arrival follows it. Each disc owns its endpoint membership, cell assignments,
+geometry lock and running serpentine coordinates. Both use the same cell-local path walker
+as ordinary Refresh; independent polar easing must not cut across the serpentine.
+
+The two worlds share one angular budget, divided by their live weights. The departing
+wedges occupy the leading arc and the arriving wedges grow into the released trailing arc.
+Each uses the ordinary allocator's pitch and seam rules inside its allocation. Partial-arc
+seams cannot cross either end, and drawn dot radii remain capped at their wedge edges;
+a zero-width seat stays hidden rather than becoming the renderer's default-size dot.
+
+Both discs keep their endpoint's full row depth for the whole switch; only the arc between
+them moves. The budget is divided by each note's fold weight, `smoothstep(min(1, alpha /
+FOLD_ROOM_AT))` with `FOLD_ROOM_AT = 0.25`, so a note holds its full seat from a quarter of its
+opacity: zero at zero, continuous, no step. Measured 2026-10-09 on the demo vault, folders to
+tags, notes per degree on each side against its resting density: with the rows folding to one
+on a smoothstep of the walk and the budget on raw alpha, the arriving wedges started at
+**16.3x** and the leaving ones ended at **20.1x** (many dots drawn on one seat, which read as a
+thinly populated trail). With full depth and the fold weight: **5.0x** and **7.9x**. The leaving
+wedges still run about 3x through the middle of the switch; that is not yet explained.
+
+Opacity stays monotone per display node. Both discs remain visible during the transition,
+then the stand-ins are removed and the result equals a fresh resting layout. The radial
+fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.
+The clock-hand fallback remains available through `foldSwitch = false`.
+
+`tags: parallel Refresh` checks both directions, reverse/forward date order, visible angular
+motion in both discs, simultaneous visibility, disjoint drawn angular extents, opacity
+monotonicity, convergence and temporary-node cleanup.
+The old fixed-angle animation is a negative control: visible angular motion is effectively
+zero and departure does not reverse date order. The existing Refresh/date-filter wedge
+checks remain unchanged.
+
+## Fold continuity and sparse-result labels (github#186, historical fold)
+
+The fold now interpolates each endpoint row's radius toward that band's first row while
+keeping its endpoint angle. It does not rebuild a fractional top row and redistribute its
+notes across a wedge. The departure folds from the positions captured at the switch (`foldSrc`; `posSrc` is not taken
+on a switch, which is why the first cut folded nothing on the demo and 10k), the arrival from
+`finalPos`, and each fold covers only its own disc's notes, since one seat map overriding the
+other left the leaving disc standing still. At amount 1 the target is exactly the endpoint;
+the existing per-frame radial cap and convergence loop still govern the drawn positions.
+
+`FOLD_ENTER = 0.05`, `FOLD_PHASE = 0.65`, and `FOLD_FADE = 0.18` are fractions of the existing
+cascade duration. Departure and arrival overlap for 0.60 of the clock; arrival finishes at
+0.70, leaving time to converge. `FOLD_LAND` is removed: there is no second layout to blend onto.
+Fold opacity no longer additionally shrinks the radius. Endpoint size ceilings and actual
+frame-clearance sizing remain active; the clock-hand fallback retains its shrink behavior.
+
+Sparse filtered views do not automatically label notes. The former 12-note threshold and
+180-pixel truncation rule were removed at the user's request on 2026-10-04. Labels remain
+available through explicit interaction, including hover and focus.
+
+Verification added to `tags: fold and regrow` measures angular drift between lit frames as well
+as movement, opacity reversals, cleanup, and resting-layout parity. `sparse filtered results`
+measures zero automatic label-canvas ink on a sparse day and after clearing the filter.
+The existing `filtered to the bone` check enforces the rest/count size bound described below.
+
+Historical measurement on 2026-09-26, before removing automatic labels, executing the actual
+fold and label methods in isolation:
+401 fold positions, maximum angular drift **1.11e-16 radians**, endpoint drift **0**, monotone
+radii and unchanged pinned positions; label truncation, canvas bounds, pairwise overlap,
+density cutoff, hidden-node exclusion, filter clearing, and forced-label priority pass.
+Filmed on the same day, at slow ×4, both discs folding, the reviewer's chroma proxy (300 px
+frames, annulus 30–145 px, against the smaller resting endpoint) and the arrival-window frame step:
+
+| | trough, demo | trough, tag | ripple mean / max, demo | 10k, ms a frame |
+|---|---|---|---|---|
+| the re-planned fold (FOLD_ENTER 0.30, landing blend) | 24.2% | 17.7% | 1.34 / 3.41 | 70.7 |
+| this fold, both discs | **53.8%** | **48.4%** | **0.62 / 3.94** | **64.5** |
+| this fold with the leaving disc not folding (the first cut) | 73.3% | 66.1% | 0.59 / 3.96 | -- |
+| develop's clock hand | 95.7% | 94.7% | -- | 57.7 |
+
+The fold check reads fold 893 / grow 19.2 on the demo and 285 / 893 on the 10k (grow is a per-frame
+maximum, the glide cap), angular step 0, relayout drift 0, and `render-diff` at rest shows 0
+canvas pixels differing on every fixture and ratio. A leaving disc that only fades where it stands
+keeps more colour in the middle than one that folds; the design folds both.
+
+## Fold-and-regrow prototype timing (github#186, historical)
+
+`design/0015` records the branch's new default dimension transition. `FOLD_ENTER = 0.4`,
+`FOLD_PHASE = 0.6`, and `FOLD_FADE = 0.18` are fractions of the existing cascade duration.
+Departure and arrival overlap for 0.2 of that duration. Small cells lengthen their fades to
+`min(FOLD_PHASE, max(FOLD_FADE, FOLD_PHASE * 3 / n))`. These are prototype choices, not
+measured acceptance thresholds. The clock sweep remains available through `__vg.foldSwitch`.
+
+The intended guarantees are monotone opacity on both worlds, independent locked ring boundaries,
+endpoint cell membership, the existing `RADIAL_STEP_MAX` movement limit during the walk, frame
+clearance when enabled, and no retained fold sizing or stand-ins after completion or tab hiding.
+The targeted checks are `--only "tags: fold and regrow"` and `--only "tags: hiding the tab"`.
+
+**Run and measured on 2026-09-25, on the left screen, before the commit** (the prototype's author
+could not launch a browser): *fold and regrow* passes on the demo (tag: 119 frames, fold 952
+units, grow 105, 0 reversals, relayout drift 0.000, converged; folder the same) and the 10k
+(33 frames, converged); *hiding the tab midway* releases everything (1,403 stand-ins → 0, drift
+0.000); the three switch checks it adapted stay green on all five fixtures. Filmed against
+develop on the tag and demo vaults (`scratchpad/186/cap-fold`, on the review page): the old rings
+fold to one row and the new grow from one; **around the middle of the clock the disc goes nearly
+dark** — old faded, new not in — the 20% overlap being thin; and **the last frame snaps 0.23 of
+a pitch (demo) / 0.16 (tag) onto the rest**, which the hand does not. `pack-check.mjs` cannot
+judge a switch otherwise: it classifies by the ring a note is in *now*, so its rail and area
+readings are noise for this act. **Its cost on the 10k, headless at real speed: 70.7 ms a frame
+(14 fps) against the hand's 57.7 (17 fps)** — the two layout passes per frame add 22%. All three
+are open items, not acceptance; the maintainer kept the prototype on sight, default on.
+
 Measured properties that must not regress. Each one has a way to check it — use it,
 don't reason about it.
 
@@ -13,6 +150,21 @@ It builds to a temp file, drives a real Chrome, and prints the number it measure
 check, pass or fail — exiting non-zero so it can gate a push. The one property it does
 **not** cover is the per-frame animation steps; that section says so and stays manual. Numbers below are from a 450-note vault (1458 links) on
 2026-08-22; the shape matters more than the exact figure.
+
+## A walk frames its visible focus web (github#134)
+
+Search, linked-note navigation and backtracking share `centerOn()`. The landing includes visible
+neighbour dots and the quadratic hull of edges among them, with a 24 px inset. The closest ratio
+remains 0.22 and the flight remains 420 ms. A locked camera keeps its centre and widens enough
+to contain that same geometry. Filtering out a neighbour removes its framing cost.
+
+Check: `node scripts/smoke.mjs --only "walk framing"`. It drives search at 960x960, 1600x1000 and
+420x900, samples whole dot radii and curves, and covers high/low-degree notes, an isolated note,
+a hidden group and locked panning on the demo and 10k fixtures. The layout is not moved by a
+camera flight; the existing hop/backtracking check protects that separately.
+
+Measured on the demo at a 960x960 window: 118 of 126 lit endpoints outside the canvas became 0;
+10,801 of 16,830 curve samples outside became 0. See `design/0019` for scope and geometry.
 
 ## Plan parity
 
@@ -178,6 +330,11 @@ filtering 503 notes to 62.
 
 ### A dot is sized off its band's median own-step, not its tightest decile (github#107)
 
+> **SUPERSEDED by github#186 / `decisions/0017`.** There is no band-median room any more, and no
+> `ROOM_PCTL`: a dot is sized off **its own** tangential step, capped at the band's radial pitch,
+> times a ramp on its `size`. Kept here because the reasoning below is why a band-wide figure was
+> the wrong instrument, which is the argument that retired it.
+
 `ringsLayout` collects one own-step per (cell, row) into `roomPool[band]` and `pick()` reduces
 each pool to the one number `dotPx` sizes that whole band against. **`ROOM_PCTL = 0.5`.** It was
 `0.1`, and the tenth percentile is not band-neutral: the inner band packs fewer rows over more
@@ -200,6 +357,9 @@ aside.
 
 ### `DOT_MIN_PX` is a floor, and the caps below it still win (github#107)
 
+> Still true under github#186: the floor is applied before the edge, fit, hub and cascade clamps,
+> and those may still push a dot under it.
+
 `dotPx` used to scale the floor by the room factor as well as the ceiling — `lo = rp.lo * scale`
 — so **`DOT_MIN_PX = 1.5` was never a floor**: at scale 0.63 the demo vault's inner band bottomed
 out at **0.94px** and the 10k vault's at **0.81px**. The room factor still caps a dot from above;
@@ -211,6 +371,77 @@ which may still push a dot below it. So this is a floor against *scarcity*, not 
 and 0.75px, still hoverable, which is what *a sub-pixel dot can still be hovered* asserts — and a
 walking dot can still be held under its two resting sizes, which is what the two dot-size cascade
 checks assert.
+
+### The floor grows with the disc, so a dot's size does not depend on the window (github#171)
+
+> Asserted by *a dot is the same size against the lattice in a bigger window* (all five fixtures:
+> the stage at 1700×1100, then 2400×1560, every lit dot within 1% in lattice units).
+
+The ramp runs from the floor to the ceiling, and the ceiling is in lattice units × pixels per
+unit, so it grows with the window. A floor fixed at 1.5 px did not, so **every dot below the top
+of the ramp shrank against the lattice as the window grew**: a mid-weight note was a smaller
+share of its slot at 2560×1440 than at 1400×1000, and the disc read as sparse on a big screen
+while its positions were unchanged. Only a ceiling-sized dot was window-independent.
+
+The floor is now `DOT_MIN_PX × max(1, disc radius in px / DOT_REF_DISC_PX)`, with the disc radius
+taken at camera ratio 1 from the locked `maxR` (so it does not breathe through a cascade).
+`DOT_REF_DISC_PX = 340` is the disc at the tuned 1584×961 harness viewport, measured on all five
+fixtures at **327–336 px**, so at that viewport and anything smaller every dot is unchanged and
+the floor is the 1.5 px legibility floor it was. Above it the floor is a fixed fraction of the
+disc, and the whole picture scales with the window.
+
+Measured headless, `?rest`, diameter in lattice units, outer-row median (develop → this):
+
+| fixture | 1400×1000 | 1920×1080 | 2560×1440 |
+|---|---|---|---|
+| shape | 0.353 → 0.356 | 0.341 → 0.356 | 0.309 → 0.356 |
+| demo | 0.332 → 0.336 | 0.316 → 0.336 | 0.273 → 0.336 |
+| 10k | 0.565 → 0.573 | 0.526 → 0.573 | 0.419 → 0.573 |
+
+1280×800 is unchanged (shape 0.398, demo 0.389, 10k 0.706): the disc there is under the
+reference and the floor genuinely binds. The github#186 acceptance script
+(`investigations/186/dotsize-186.mjs`, its own 1200×1000 window) reads identically before and
+after on shape, demo and the 10k — corr(degree, px), hub/leaf ratio, distinct sizes, column
+offset — and the goldens do not move.
+
+Rejected: anchoring the ramp's base to the ceiling (`lo = max(hi × NODE_MIN/NODE_MAX, floor)`),
+which the issue proposed. It only reaches dots whose ceiling is above ~6.4 px; on the demo and
+the 10k the ceiling sits near the floor, so 1920×1080 was untouched and the 10k did not move at
+all, which is exactly the shape of vault the report came from.
+
+### The ramp is curved, so a typical dot uses its room (github#202)
+
+> Asserted by *no two resting dots overlap* (all five fixtures). Measured in
+> `investigations/202/`, with the alternatives that were not built.
+
+Most notes carry few links, so a linear ramp left the median note at ramp 0.41: on four of the five
+fixtures that is 0.50–0.65 of its row's cap. **`DOT_RAMP_CURVE = 0.5`** takes the square root of
+the ramp position. The order by links is kept, since the curve is monotone and continuous, so
+nothing steps, and the median lands at 0.70–0.77 of the cap. `takeRest` curves `restT` the same
+way. That is what keeps *a settled dot is the size a fresh relayout gives it*: `restAt` and the
+floor-share term in `dotPx` both read `restT`.
+
+**An inner-ring dot's ceiling never exceeds the hub row-0 cap.** Row 0 holds a ring's most-linked
+notes, and `HUB_ROW0_FRAC` caps them. Before the curve, that cap already bound on the sortspec
+fixture without inverting anything. Under the curve, the notes behind row 0 grew past it, and the
+ring's link-rank correlation fell from 0.94 to −0.13. Capping the ceiling instead of the dot keeps
+the ring ordered (1.00). The cost is that this ring draws smaller than it did (median 5.18 → 4.24
+px), which is accepted.
+
+**A cell of `FEW_IN_CELL = 3` notes or fewer is sized against the row's pitch, not its own
+step**, and only while *Size dots from the frame* is on. `ringsLayout` records that cell's room as
+the pitch, so the walking cascade interpolates it like any other room. A first cut decided this in
+`dotPx` from a cached group count, which went stale while notes faded, because `alpha` is mutated
+in place. A 1–3 note wedge's own step is about half
+the pitch, so its dots sat near the floor: on demo 1.62 px against a ring median of 2.39. The frame
+clearance (`FIT_SHARE` × nearest neighbour) is what keeps a grown dot off its neighbours, which is
+why this is conditional on it. Lifting the cell clamp for every dot was measured and rejected:
+ceilings tripled, and the 10k got 12,260 near-touching pairs. Inside such a wedge the edge cap can
+then order dots by slot rather than by links (4 of 4 pairs on demo and the 10k). That is accepted:
+it only changes size, and nothing overlaps.
+
+The suite's serpentine check does not see either cost. It reads cells of six notes or more, and
+the sortspec inversion left 81% of notes in an ordered cell, above its 65% bar.
 
 ### What the two together moved
 
@@ -325,6 +556,24 @@ its place in `order[state.dim]`. design/0004 carries the reasoning and the price
 options that remain.
 
 ### The real cause is the band split — fixed in github#117, in two halves
+
+### Sparse tags and folders keep separate wedges (github#119, github#186, github#202)
+
+`SMALL_GROUP = 0` applies in both dimensions. A tag with one, two or three notes keeps its
+own wedge, colour and legend row. Sparse usage is information the disc must expose, so it
+must not combine unrelated small tags to make them look denser. The dot-sizing changes in
+github#171 and github#202 provide readability without hiding this structure.
+
+The tag-only threshold of four introduced during github#186 is reverted on 2026-10-14.
+It combined 100 tags (137 notes) into one inner wedge in the dominant-folder fixture,
+reducing its 116 inner wedges to 17. Those tags must once again occupy their own wedges.
+The dormant merge path remains disabled, as it already was for folders.
+
+`tags: small tags keep separate wedges and interrupted defaults retain note identity`
+checks tags of one, two and three notes at rest, after a hard relayout and under a temporary
+filter. It asserts three correctly named inner wedges with no mixed-tag cell. It also
+interrupts a dimension switch through the visibility-default setting: no stand-ins may
+survive the resulting hard relayout, and all surviving notes must be their original nodes.
 
 Neither github#107 change touched why the inner lattice was tighter in the first place.
 `balanceBands()` optimised ring **thickness** — its cost was `|inner − BAND_RATIO · outer|`,
@@ -533,6 +782,628 @@ folder dimension) — under the cost's own `HOLE_MAX` ceiling of 0.36, which is 
 fixture that asserts it**, before and after, because `balanceBands()` runs only when
 `bandLock` is null: a filter re-packs inside rings it does not re-choose.
 
+## "Packed", and the four ways a cascade broke it (github#186)
+
+The definition, given on 2026-09-21 and implemented as given:
+
+> **Packed means that at all times every wedge has enough notes to touch both seam sides and
+> the inner and outer rings, and the static inner and outer radii are always honoured. A wedge
+> is never wider than its notes can fill. The last frame of a cascade is the rest, with nothing
+> to snap.**
+
+At rest the packer already kept it. The github#186 investigation measured every cascade frame of
+four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
+own mechanism. What follows is what each one was, and what it reads now.
+
+### How a dot is sized, and the four ways it was got wrong first (github#186)
+
+A dot is `floor + (ceiling − floor) × ramp(size)`, the floor `DOT_MIN_PX` grown with the disc
+above the reference window (github#171), the ramp linear in `size` over
+`NODE_MIN..NODE_MAX`, and the ceiling
+
+    DOT_OF_PITCH × min( the CELL's tightest tangential step × DOT_CLEAR,
+                        DOT_OVER_PITCH × min(the band's radial pitch,
+                                             UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH) )
+
+**Each of the three terms in that `min()` guards a different thing, and collapsing them back into
+one number is how this was broken three times:**
+
+| term | what it guards |
+|---|---|
+| the cell's tightest step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it, and nothing about the note's own ROW reaches it either (the fourth failure below) |
+| `DOT_OVER_PITCH × pitch` | how far a dot may outgrow the **radial** pitch once its own tangential step allows, which is where a filtered disc's dot growth comes from |
+| `UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH` | the absolute ceiling, applied **to the pitch**, never to the product — at `2.6 × UNIT` it held a filtered disc's dot at 425 units against a 3,400-unit step (d/s 0.07); where develop's dots actually stopped is `2.6 × 2.6 × UNIT`, and no resting pitch reaches either |
+
+The three failures, each measured before it was found:
+
+1. **`DOT_OF_PITCH × min(own slot, pitch)` and nothing else** removes link weight from the dot
+   entirely — `solveBand` makes the cell square, so at rest the slot *is* the pitch and the
+   `min` always takes the pitch. Measured: corr(degree, drawn radius) **0.827 → 0.007** on the
+   demo's outer band, and **815 notes on the dominant-folder vault drew at two distinct sizes**,
+   one per band.
+2. **Capping the product rather than the pitch** collapses the sparse case: the dominant-folder
+   vault filtered to eight notes read a dot of **8.8 px against develop's 52.96**, and
+   *filtered to the bone, the disc stays drawable* failed at **d/s 0.03** against its 0.15 floor.
+3. **A multiplicative ramp** (`ceiling × ramp`) pins every dot whose ceiling is near the pixel
+   floor, which on a dense vault is the whole disc — the demo's ceiling is ~2.0 px against a
+   1.5 px floor, and the measured result was **one drawn size for 1370 notes**. The ramp runs
+   from the floor to the ceiling instead, which makes pinning impossible.
+
+4. **Sizing a note by its OWN row's step breaks the serpentine**, silently and with the placement
+   still perfect. A row's step differs by row — the rim row and the end margins most of all — so
+   the dot began carrying *where a note sits* as well as what it links to. The snake has no
+   visible geometry of its own; it is legible only as the size gradient that falls along the path
+   and reverses each row, which is the law `animation.md` states as *size stays monotone in link
+   weight*. Measured per cell as Kendall tau of drawn radius against rank in `c.list`
+   (develop → per-note ceiling → per-cell ceiling): demo **0.99 → 0.51 → 0.99**, spec
+   **1.00 → 0.82 → 1.00**, shape 0.96 → 0.84 → 0.96, and note-weighted on the 10k
+   **0.99 → 0.68 → 0.98**. Row-direction alternation is **100% on all three builds and all five
+   fixtures**, which is exactly why no position check — the goldens included — could see it. The
+   ceiling is one number per **cell** now: the minimum, over the cell's rows, of each note's own
+   slot at its radius, so inside a wedge the ramp is the only thing that varies. A row holding a
+   lone note contributes the whole arc and never binds that minimum.
+
+The hub-to-leaf dot ratio is therefore a **consequence** of ceiling over floor, not a constant:
+it lands at 1.64–2.09× across the five fixtures against develop's 1.15–1.93×, and a named
+`DOT_LINK_RATIO` was tried and retired because a ramp anchored at the floor cannot honour one.
+
+`.ai-context/investigations/186/dotsize-186.mjs` measures all of it — corr(degree, drawn radius),
+corr(degree, ramp) with the ceiling divided out, the hub/leaf ratio, the distinct-size count and
+the column offset — and is the acceptance test for any future change to this.
+
+**Weighted arcs and slots did not land** (`LINK_WEIGHT = 0`), so everything below is measured with
+the arc still following opacity alone. `decisions/0017` carries why, and why the ring split must
+count notes rather than weight if they ever do.
+
+**The resting halves are asserted by the suite**, on every fixture:
+
+| check | what it reads |
+|---|---|
+| *no lit note is outside its band's static rails* | the CENTRE of every note at full alpha against `geomLock`'s own rails. Row 0 of the inner band may spend `HUB_ROW0_FRAC` of the hub on purpose (github#35) and the outer band is already shifted out by its row-0 dot (github#160), so these are centre rails, with half a graph unit of float noise allowed — the same window the lattice check uses |
+| *a resting wedge fills the arc its notes can* | each wedge's seam coverage — the angular span of its dots over the arc it actually draws — against `(n-1)/n + 2·dot/arc` for its rim row. A one- or two-note wedge is allowed the little its notes can reach, which is the github#119 tail and is why this is not a flat threshold |
+| *the serpentine survives, in direction and in size* | per cell of six or more notes: every adjacent row pair runs against its neighbour, the **note-weighted** median cell reads Kendall tau ≥ 0.90 of drawn radius against rank, and ≥ 65% of notes sit in a cell at 0.90+. Note-weighted because a cell whose dots are all at the pixel floor scores tau 0, and on the 10k that is 22 of 34 cells on develop's build as well as this one — an unweighted median is unusable there. **Its teeth were proven**, not assumed: reverting the per-cell ceiling turns it red on demo (0.72, 24%), the 10k (0.88, 37%) and spec (0.87, 49%). It stays green on shape and tag, where the same defect cost only 0.96 → 0.94 and 0.94 → 0.91, so it is a regression gate and not a proof |
+
+**Chrome 153 headless reports `prefers-reduced-motion: reduce`, and the page honours it**, so every
+cascade completes in two frames. Found the hard way: commands that produced 388-frame cascades an
+hour earlier produced **2**, with `restA` and `restB` byte-identical — the layout change was right,
+the animation simply did not run. `smoke-runner.mjs` was affected worse than the probe. It set
+`reduce` for fast-clock checks and restored with `features: []`, which means *Chrome's own default*
+— and since 153 that default **is** `reduce`; a `clock: "real"` check never entered that branch at
+all and inherited it from the browser. Either way an animation check would assert against a snap and
+pass. Both `smoke-runner.mjs` and `probe-186.mjs` now set `no-preference` **explicitly** and
+**throw** if the browser still reports `reduce`, rather than measuring nothing. Never restore
+emulated media with an empty feature list.
+
+**The per-frame halves stay manual**, in `scripts/pack-check.mjs`, because automation's frame
+pacing is not a person's and a threshold tuned under it measures the harness rather than the page
+(`animation.md`, *Checking*). It reads a `probe-186.mjs` run and asserts five things: RAILS (no
+lit note's centre outside its band's rails on any frame), REST (a band's outermost lit note never
+past `max(rest before, rest after, rail)`), AREA (area per lit note stays between the two resting
+values), SEAM (a lit wedge's coverage never below its resting value, scaled by the share of itself
+the alpha ≥ 0.5 measure can see), FILL (a wedge is never wider, per its own notes at the band's
+pitch, than it rests), **STEP**, **TOUCH** and **TICK**. The last three came out of defect 2's
+second attempt, below.
+
+**Every bar here is derived from something, and each derivation is written down so the next person
+does not "tighten" it back and rediscover why it is where it is.**
+
+| bar | number | where the number comes from |
+|---|---|---|
+| STEP | 3% | frame-to-frame pitch noise is under 1%; the smallest real step measured was 13%. A wide gap to sit in, not a tuned threshold |
+| TOUCH | `1 − 0.6 / rows_live`, per frame | **the row cap's own guarantee.** The cap holds the top slot's outer edge at most half a pitch under the rail, so the worst honest reading on a band of `rows_live` rows is `1 − 0.5/rows_live`; 0.6 leaves a tenth of a pitch of margin. On 5 rows that is 0.88, on 4 rows 0.85, on 3 rows 0.80 |
+| TICK | 0.31 of the band's pitch | `RADIAL_EASE = 0.25` closes a quarter of a *pitch* per frame (`decisions/0002`), and the pitch itself grows up to a quarter across a walk, so `0.25 × 1.25 = 0.3125`. Absolute is wrong: 38 units on a 160 pitch and 63 on a 250 are the same tick |
+| AREA | ±7% | **symmetric, and loose because the endpoints are two samples.** A 2% ceiling cannot be supported by two resting measurements of a quantity that is being walked between them. Do not tighten it back to 2% |
+
+**TOUCH and TICK assert only while a band is actually populated** — at least one lit note per live
+row, at least three lit, and at least a tenth of what the band rests with. A band down to its last
+few notes reads 0.82 of the rail on *every* build, develop included, and it is not touching
+anything. Both are reported when thinner, never asserted.
+
+**TICK measures a NOTE, not the band edge.** The edge metric counts a fade as a move: when the
+outermost lit note goes dark, `rMax` drops a full pitch with nothing having moved, which read
+exactly 1.00 of a pitch on two acts. A per-note step taken at opacity ≥ 0.5 never sees a note that
+has gone dark, and never sees the direct-assigned ones under 0.05 that make a raw per-note maximum
+read 154–2476 units on develop. The band-edge figure is still printed, as a report and not an
+assertion.
+
+**The AREA trade, so nobody reads the under-readings as a regression.** The row cap in defect 2
+trades a bulge *outside* the rail for bunching *inside* it, and the definition prefers under to
+outside. Measured across the five acts: at worst **1.02×, 1.06× and 1.065× over** the resting
+ceiling and 1.05–1.06× under the floor, where develop sat **1.30×, 1.29× and 1.54× over**.
+
+### 1. A band empty at one end walked to the density fallback
+
+`solveBand([])` returns `{ sp: sp, rows: 0 }`, and `sp` there is the *density fallback*
+`min(DENSITY_MAX, sqrt(full/now))` = **2.6** — a pitch nothing rests at. The cascade took it as
+`spDstB`, so the thickness walk ran from the source lattice to 2.6 × the source depth.
+
+Soloing `03 - Resources` on the demo vault: the departing outer band's pitch walked **160 → 416
+px** and its outermost lit note reached **5845 px, 1.447× its locked rail of 4038**, with 1058
+notes still fading. That is the spray the solo clip shows.
+
+**A band empty at one end now holds the other end's pitch and depth.** Measured after: the same
+band's outermost lit note tops out at **3937 px, its own resting value, 0.975× the rail**, and
+**0 of 389 frames** are past a rail.
+
+### 2. The top row rode out to the rail
+
+A cell's row is `Math.floor(pp)` while its row *count* is a real number being walked, and the
+pitch was `T / rows_walked`. So while the count ran 6 → 5.01 the outermost row sat at
+`5 × T/5.01` — against the rail — and dropped a whole pitch when the count crossed 5.
+
+Hiding `03 - Resources`: inner band edge **1754 → 1875 px at pr 0.86** (rail 1884) → 1728 at
+rest, and area per lit note **1.00× → 1.30× → 1.17×** with the destination having been 1.17×
+all along. Hiding `inbox` on the tag disc: outer edge **3721 → 3952 at pr 0.94**, **141 px
+outside the locked `maxR` of 3811**.
+
+#### The first fix was exact at both ends and DISCRETE in between, which is its own defect
+
+Solving rows and pitch from the live weighted count each frame, through the same `solveBand` the
+resting layout calls, does hold every rail: **0 frames past a rail on all four acts**, against
+develop's 369 and 43. But `rows = ceil(T/s)` is an **integer**, so `pitch = thick/rows` *steps*
+as the live weight falls — and pitch is the row spacing, so **every note in the band moves at
+once**. Found by eye on the act nothing had measured: soloing `misc` on the dominant-folder vault
+(27 of 954 notes, outer band) walks six row counts down and reads **15 pitch jumps of 13–21%**
+(160 → 183 → 213 → 256 → 320 → 427, then ten more at the tail). The four measured acts read 1, 3,
+1 and 4. develop reads **0 on all five**, because it walked the pitch continuously — which is
+exactly what let its top row ride past the rail.
+
+**With integer rows you cannot have a continuous pitch AND exact fill of the rail on every frame.**
+That is the whole of it, and the three candidates are the three ways to lose:
+
+| | pitch | rail | cost |
+|---|---|---|---|
+| develop | continuous | **crossed**, 1.45× on the solo act | 369 frames outside the disc |
+| walk the top row's radius, pitch `top/(rows_int − 1)` | continuous | held | **1.12× off the resting density at pr 0.998** — a snap at settle |
+| live `solveBand` each frame | **steps 13–21%** | held | the whole band moves, 1–15 times an act |
+
+**What ships is develop's continuous walk with the row INDEX capped.** `placeCell` takes
+`rowCap = floor(rows_walked − 0.5)` instead of `floor(rows_walked)`, so the top slot's outer edge
+(`rowCap × pitch + pitch/2`) is `≤ T` at every frame by construction, and **`thickAt` is clamped to
+the band's static thickness** so that `T` is the real rail and not one that walked off the disc.
+At rest `rows_walked` is an integer and `floor(rows − 0.5) = rows − 1`, so **nothing at rest
+changes and no golden moves** — which is the check that this is a cascade-only change. The notes of
+a dissolving row drop one pitch at the half count instead of riding to the rail and dropping at the
+end, and `RADIAL_EASE = 0.25` spreads that tick over about four frames exactly as `decisions/0002`
+intends.
+
+The transient cost is real and is priced above: a top gap of up to half a pitch mid-walk (TOUCH),
+and a band packing 1.05–1.06× *tighter* than its resting floor while the top row's notes bunch at
+the cap (AREA), against develop's 1.30× looser in the other direction. Blending the `n`-row and
+`n+1`-row lattices was **not** built: `design/0002` rejected exactly that twice, and
+`decisions/0002` a third time as a smeared disc.
+
+#### A centred cell steps TWO rows at a cap crossing — recorded, not fixed
+
+A cell with fewer notes than its band is deep takes `placeCell`'s **centred** path: one note per
+row from `cStart = round((bandRows − nEff) / 2)`. Both terms move during a walk — `bandRows` falls
+with the cap, `nEff` falls as the cell's own notes fade — so at a crossing `cStart` can move by one
+in the same frame that the note's index inside the cell moves by one. Two rows, on one note, in one
+frame.
+
+Measured soloing `03 - Resources`, inner band, note `2` of `00 - Inbox` — **3 notes in a 6-row
+band**, so centred throughout:
+
+```
+pr     pitch  lit  rows  rMax   step
+0.499  172.7  167   5    1792    42     <- RADIAL_EASE, 0.25 of a pitch
+0.501  173.2  164   5    1750    85     <- 0.49 of a pitch, the crossing
+0.504  173.6  163   5    1719    64
+0.507  174.1  163   4    1696    48
+0.509  174.6  160   4    1680    43     <- back to 0.25
+```
+
+`85 → 64 → 48 → 43` is a clean 0.75 geometric decay, so **the easing is working and the target
+moved twice as far as a row tick should**. It is one frame, one note, 85 units on a 4000-unit disc,
+and about half the 160-unit tick `decisions/0002` accepted before easing existed.
+
+**Since the glide cap (RADIAL_STEP_MAX, below) that frame reads 0.12 of a pitch, inside the bar; walking cStart rather than rounding it remains the real fix and is still deferred** — out of github#186's
+scope, which was the four in-flight defects and the packing rule. TICK asserts at 0.31 and this one
+frame reads 0.49, so the assertion names this crossing rather than being relaxed: a blanket
+exclusion would hide the next one.
+
+### 3. A single-cell whole-group toggle drove its arc on the clock, not on its notes
+
+`colWalk` (github#19) replaces a toggling single-cell group's allocation basis with a ramp, so
+its wedge closes monotonically whatever the stagger does. The ramp was `1 − pr` — the cascade's
+clock — so the arc lagged the notes: `00 - Inbox` kept **90% of its arc with half its notes
+gone**, and the worst arc-versus-notes gap on the solo act was **58%**.
+
+**`f` now comes from the group's own weight sum over its rest weight.** A *move* (a note changing
+group during a dimension switch) keeps the edge ramp — that path is github#49's and its notes
+belong to two groups at once.
+
+### 4. The last leavers inherited the ring
+
+A wedge's share is its geom over the band's, so when a whole band is leaving and its notes fade
+on a stagger, whoever is left holds a growing share of a ring that stays full: `10 - Literature
+Notes` ended up **at 1% opacity over 287°**, and its wedge was **18.7× wider than its own notes
+could fill**.
+
+**A band leaving entirely now holds its seats and its source arc shares for the whole fade.**
+`planKeep` keeps every source member of such a band in the plan, so its cells' geoms are constant;
+each wedge draws `share × (live weight / source weight)` and the arc it does not spend is left
+**empty at its own trailing edge** rather than handed to the next group. So the wedges shrink
+where they stand, in place, and the ring simply opens up behind them.
+
+Measured on the solo act, worst wedge against its own resting fill: **18.7× → 1.0×**. On the tag
+act: **1.75× → 1.08×**.
+
+#### Then the maintainer asked for the ring to close like a fan
+
+Shrinking in place fixed the inheritance but opened gaps all round the ring, every wedge closing
+on its own. Asked for, on 2026-09-23: *"when we toggle a whole disc off it would be nice if the
+wedges would move together … fan back to 12, one clockwise one anti-clockwise"* — and, when a
+first attempt reused the dimension switch's clock hand (dots erased in place by a sweeping edge):
+*"I wanted wedges that get smaller … not notes just hovering out."*
+
+A fan was built and measured first: the ring's plan frozen at full weight (`ringHeld`), its wedges
+packed by what was lit and the whole ring squeezed toward 12 by its lit fraction, the outer ring
+from the clockwise side and the inner from the counter-clockwise side, with `SEAM` and `FILL`
+exempted for it (`HAND`). It moved no note radially and passed every criterion. Shown beside a
+third variant the same afternoon, it lost: *"that looks fantastic, dynamic, aligns with the intro, I
+think we solved it"* — and the fan, its freeze, its squeeze and its exemption were removed the
+same day rather than kept behind a flag. The history is in git at `7e70bff` and before.
+
+**A ring leaving or arriving WHOLE now goes the way the intro does, or its reverse.** The intro
+is a timeline walk: each ring grows from **one row**, notes arriving at their rest in date order,
+wedges growing in place as the ring thickens. So:
+
+- **A ring leaving whole thins to one row** — `bandDst[k] = 1`, its pitch held at the source's —
+  and its notes leave **newest first**, spread evenly over the window; each wedge closes in place
+  as the ring re-packs, until the ring is one row and gone. The github#67 radius deal (a
+  single-cell wedge leaves outside-in) is skipped for a ring going by date, as is the per-cell
+  interleave; the ring's own order is the order.
+- **A ring arriving whole grows from one row** — the pre-existing `bandSrc[k] = 1` path the intro
+  already took — and its notes arrive **oldest first**. Nothing is held: `weightOf` is plain
+  `alpha × linkWeight` for every cascade again.
+- **Under the hand** (the dimension switch) a ring going whole keeps its rows, as before: the hand
+  erases dots in place and does not thin a ring.
+
+Measured on the maintainer's vault, soloing `04 - Daily Notes`: **0 frames outside a rail, 0 pitch
+steps, 0 movement after landing, worst lit-note step 0.12 of a pitch**. The one cost against the
+fan, and accepted: the emptying ring re-packs while it thins, so up to **11 notes start a hop in
+one frame** (10 such frames) where the fan started none; no hop exceeds 0.125 of a pitch. Showing
+the ring again reads the same way in reverse: `03 - Resources` first, `02 - Areas` last.
+
+Two consequences for `pack-check.mjs`. **`TOUCH` is not asserted on a ring going or coming
+whole** — a ring thinning to one row leaves its rail by design, so *the rings' thickness is
+locked* holds for a ring being filtered inside, not for one leaving; the report names the band.
+And **`STEP` is now per frame**: the samples carry the cascade's frame counter, and a capture gap
+of seven frames had read as a 7% "step" on the demo's solo `03`, where the inner ring's pitch
+climbs 215 → 238 at 0.4% a frame as the github#186 thickness cap lets go late in the walk.
+
+#### Two regressions a static review found, both measured before they were believed
+
+A second reviewer read the branch cold on 2026-09-23 and named two regressions against
+develop. Both were confirmed with a scratch harness before anything was changed.
+
+- **A toggled wedge's progress was measured against every note in the folder, lit or not.**
+  `tglFull` summed all of a group's notes, while the live weight above it only ever counts the
+  lit ones, so with half a folder outside the date range the ramp started at 0.5. Measured on the
+  maintainer's vault with 9 of `02 - Areas`' 19 notes in range (`scratchpad/186/denom.mjs`):
+  hiding it snapped the wedge **from 6.21° to 2.90° at the click**, and showing it again walked
+  to 2.90° and **jumped to 6.21° on landing**. The full is now the notes taking part, at their lit
+  endpoint (`alpha` for a departure, `to` for an arrival): 6.21° → 0 and 0 → 6.21°, no step at
+  either end. The nine measured acts toggle whole folders, so none of them could see it.
+- **The pixel floor scaled with the zoom.** `dotPx` returns a renderer size, which the renderer
+  divides by the camera ratio; `DOT_MIN_PX` was applied to that size unscaled, so the 1.5 px floor
+  was 6 px zoomed in four times and 0.375 px zoomed out. Develop scaled the floor by the ratio
+  (`lo = min(hi, DOT_MIN_PX × cam)`), and does again. At ratio 1 every dot is byte-identical
+  (smallest 1.943 on the maintainer's vault before and after), so the goldens do not move; at
+  ratio 4 the smallest dot is its own ceiling, as on develop, rather than a floor it cannot fill.
+
+#### Two suite failures at the merge gate, one cause
+
+The orchestrator's own full-suite run after merging (2026-09-23, reverted) failed *a dot never
+outgrows its resting size while a cascade walks* on the 10k vault and *filtered to the bone* on
+the dominant-folder and tag vaults. Both were replayed headless (`scratchpad/186/dotwalk.mjs`
+takes the check's own biggest-lit-dot measure per frame; `bone.mjs` runs the check's probe
+verbatim from `probe-bone.js`) before anything changed.
+
+- **The bone**: at the last 0.5% the dominant-folder vault's outer dots read exactly develop's
+  ÷ 2.6 (18.4 / 13.4 / 23.3 against 47.8 / 34.7 / 60.8 renderer px, same notes): the ceiling's
+  pitch cap at `2.6 × UNIT` bound where develop's never had. Raised to `2.6 × 2.6 × UNIT`
+  (decisions/0017): **0.07 → 0.18** (develop 0.19). Rest layouts byte-identical on all five.
+- **The overshoot**: soloing the 10k's two-note vault root, the biggest dot walked to 157.7
+  units and rested at 149.3. Traced: the rest was ramp-limited below the hub cap, and the ramp's
+  floor is 1.5 *screen* px, so it is `DOT_MIN_PX × camera ratio` in renderer size — and the
+  auto-fit after the landing takes the ratio from 0.95 to 0.60, shrinking a floor-dominated dot by
+  8% *after* the cascade. The endpoint size the walk is capped at was taken at the old ratio.
+  With the ceiling above, that dot rests on the hub cap (6.84 renderer px, the same figure as
+  develop's), the walk is capped at exactly that, and the check's own measure reads **1.000× on
+  all five fixtures** (smallest group with two notes on each, as the check picks). The floor's
+  camera coupling is develop's too and still latent for a dot that rests ramp-limited and
+  floor-dominated while the fit changes the ratio; it is recorded here, not fixed.
+- **The tag vault's bone is a knife-edge, not a size**: six hub-capped notes in one row, 7.16 px
+  on both builds; the branch's median gap is 64° against develop's 63° (a 42° seam against 45°),
+  and the check rounds diameter/step to two decimals — **0.14 against 0.15**. Nothing was tuned
+  to cross it; asked, the maintainer left it (2026-09-23): no product change for a 0.4% margin,
+  and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
+  at 66/67 on this branch, by decision**, until that floor is.
+
+#### A filtered dot keeps its link rank and a count-based readability floor
+
+Balanced was accepted on 2026-10-04 after comparing headed stills on all five fixtures.
+The floor is `min(7.5, 1.5 + 0.7 * log2(baseline / max(1, visible)))` CSS pixels of radius,
+active only below the baseline count. `DOT_COUNT_GAIN = 0.7` and `DOT_COUNT_MAX_PX = 7.5`
+are independent of link rank. Visible timeline weights are summed by unique note; transient
+dimension-switch copies never count as additional notes. Settings-hidden notes are excluded
+from the baseline. The full-vault layout and original sizes remain unchanged.
+
+The floor follows the same eased source/destination clock as visible-link rank. Interrupting
+a cascade starts from its current floor. Each endpoint is measured with its own floor, and
+temporary unfiltered rest measurements bypass it. The final size is bounded by the larger
+of `3 * rest` and the new floor, then by wedge, neighbour, hub and animation endpoint clearance.
+Spatial constraints may therefore keep a dot smaller than the requested floor.
+
+`count-based note sizes ease through filtering and interruption` checks narrowing, widening,
+interruption continuity, empty ranges, exact restoration and settled relayout parity on every
+fixture. The density and bone checks retain their spacing/overlap assertions and now bound
+growth against the independently calculated count floor as well as the original rest.
+
+The following measurements document the previous 2026-09-25 decision, superseded only where
+the accepted readability floor exceeds the old three-times-rest ceiling.
+
+Asked on 2026-09-25, watching the range clips: *"why are the notes growing so much when filtering
+to the last few percent by date? links are vanishing as well so note weight should not
+explode."* Measured on the dominant-folder vault, develop and the branch alike
+(`scratchpad/186/degrees.mjs`):
+
+| range | notes | median degree | median **visible** degree | median dot | pitch |
+|---|---|---|---|---|---|
+| rest | 954 | 6 | 5 | 3.24 px | 160 |
+| last 10% | 86 | 3 | 0 | 7.3 px (2.2×) | 640 |
+| last 2.5% | 24 | 4 | 0 | 15.5 px (4.8×) | 1,280 |
+| last 0.5% | 8 | 6 | 0 | 34.9 px (10.8×) | 1,280 |
+
+The growth was the pitch — the 2026-08 law that the disc's density follows the notes on screen,
+which the suite's *filtered to the bone* enforced with a diameter/step floor — and the ramp read
+whole-vault degree, never the visible one. He chose to change both (decisions/0017 has the
+mechanism): the ramp is scaled by the share of a note's links whose other end is on screen,
+walked on the cascade's ease; and under a filter a dot keeps at least its unfiltered resting
+size and never exceeds `DOT_GROW_MAX = 3` times it. After: the same column reads **3.70 / 3.88 /
+3.41 px (1.1× rest)**; demo 1.0× throughout; tag vault 7.16 px at the bone (2.0×, six orphans
+on the hub cap, which binds before the growth cap). Rest layouts byte-identical on all five
+fixtures; at full vault every share is 1, so nothing at rest changes. The check asserts the two
+bounds note by note against the resting probe, in place of the step floor and the legibility
+floor.
+
+The bounds need a rest to bound against, and the first cut only took one while no filter was on
+(`takeRestDots()`). A group hidden by default (an archive) is a filter, so a page that mounted
+with one hidden held no rest at all and nothing bounded its dots: an isolated probe of the three
+functions measured 8× growth against 3× with the rest in hand. The rest is now taken from an
+unfiltered layout pass (`unfilteredRest()`: filters cleared, full alpha, every visible share 1,
+`ringsLayout(null, true)`, then every piece of layout state restored), cached per dimension and
+per ingest so a live rebuild or a dimension switch retakes it. The check *a page that lays out
+filtered still takes its dots' rest from the unfiltered disc* takes the rest unfiltered, forgets
+it, hides a group, and requires the retaken rest to match: 0.00 % off on all five fixtures, and
+a sparse timeline after it moves none. With `unfilteredRest()` disabled it retakes 0 of 1,403 /
+10,002 / 891 dots. No fixture mounts with a group hidden, so this is the only place the path runs.
+
+#### Five things a clip review saw, 2026-09-25
+
+A reviewer went through all 35 clip pairs and named five. Each was measured before and after
+(`scratchpad/186/camride.mjs` for the camera and the lit-dot sum per frame; `pack-check.mjs` for
+the landing; mean grey of a 48-px downscale over the clip's own window for the link fans).
+
+- **Late zoom after a hide** — the disc settles, pauses, then enlarges; develop's too. github#14's
+  rule had the deferred fit wait for the landing. The maintainer chose to let it ride: the
+  destination's fit target is taken at the click (`fitTarget()` reads the destination's `lastMaxR`
+  there, and would read the mid-walk extent later), and at `FIT_RIDE_AT = 0.66` the camera flies
+  for exactly the time the walk has left. Measured: first camera move at pr 0.68, landing ratio
+  0.630 with the notes, nothing after (mirror solo `04`; spec solo `beta` 0.638). The check
+  *hiding the biggest group auto-fits the camera* now asserts no move before pr 0.6, on its way by
+  the landing, landed at the promise, `camAtRest`.
+- **A small snap at the end of the fold.** The glide cap holds every hop to 0.12 of a pitch a frame
+  while the clock runs and lets go at pr 1, so an arrival still moving on the last frame snaps
+  what it owes: 0.23 of a pitch on the demo, 0.16 on the tag vault; easing the tail onto
+  `finalPos` alone made it 0.38. The arrival now ends at pr 0.95 (`FOLD_ENTER = 0.30`,
+  `FOLD_PHASE = 0.65`, `FOLD_LAND = 0.85`), leaving the cap 5% of the clock to catch up: worst
+  step **0.12, at pr 0.96**, nothing after the landing.
+- **The fold goes nearly dark mid-clock.** With departure 0..0.6 and arrival 0.4..1 the lit-dot
+  sum fell to **11%** of its start; with 0..0.65 and 0.30..0.95 it stays at **26%**.
+- **Bright link fans overpower the fading dots** on a solo. The links of notes still at 80–90%
+  opacity converge as their ring thins to a row, and a steeper per-note edge fade (α⁴) changed
+  nothing visible. A departing note's links now fade on their own clock, gone by
+  `LEAVE_EDGE_BY = 0.35` of the walk (`departing`, `leaveEdgeK`): mean grey in the review's window
+  **34.9 → 28.1**, the fans absent in the frames, the surviving ring's own web untouched.
+- **Freeze then catch-up in a recording** — capture, not rendering: the intro's screencast has
+  gaps of 229 and 251 ms in its frame timestamps at 8.4 and 9.6 s (filmed under load, 35 clips in
+  a row), and the encoder lays frames at a fixed rate. Re-film alone to be rid of it.
+
+**What a walk holds is dropped in one place, wherever the walk is cut short** (`clearHolds`, from
+a second static review on 2026-09-25). `cellHold`, `splitHold`, `moveFrom`, `leftColor`,
+`shrinkFade` and `colWalk` were cleared by the cascade's own start and settle and by
+`hardRelayout`, but not by the four paths that cancel a `cascadeRun` from outside — the tab going
+hidden, `stopPlay`, `playTimeline` and `destroy` — so a hold could outlive its walk. Measured
+before anything changed (`scratchpad/186/tabhide.mjs`: hide the tab at pr 0.5 of a hide or a solo,
+then diff what the page laid out against a fresh relayout): **0 notes off on this branch** on both
+acts, because the held cells are the destination plan's and the hidden-tab path lays out that
+same destination — and **252 of 406 notes off by up to 21.7 units on develop**, whose hidden-tab
+path also leaves `colWalk` standing. The nine sites now call one function; the measurement reads
+0 before and after, so this is hygiene with a witness, not a fix with one.
+
+**A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
+innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
+sparse subfolders laid down the radius as one four-note column, which is the 2026-08-23 rule and
+was kept on being asked; what changed is the centring's tie: `cStart = round((rows − n) / 2)`
+sent a lone note in two rows, or three notes in four, to the *outer* row, because `round(0.5)`
+is 1. It is `floor` now, so an odd gap goes to the hub side. Measured at rest across the five
+fixtures (`scratchpad/186/restdiff.mjs`): shape, spec and tag byte-identical; demo moves 4 notes
+(`00 - Inbox` ×3, `14 - Reading List` ×1) and the 10k 4 (`13 - Someday Maybe` ×2, the vault root
+×2), each one row inward (worst 129.7 units, one inner pitch). Those two goldens are re-recorded
+for it, with the go-ahead, not to make the check pass.
+
+The same review retired the disabled link-weight experiment: `LINK_WEIGHT = 0`, its means and
+cap, `linkWeight()` (which returned 1 everywhere), the `__vg.linkWeight*` getters and the
+suite's division by the mean are gone; a note's plan weight is `alpha`, as decisions/0017 says.
+
+**`SEAM` and `FILL` fail on develop and on every build of this branch, and never reached a
+report until 2026-09-23 evening**: the run scripts printed only the six criteria under review.
+They assert that no wedge is ever under its resting coverage while a cascade walks — develop's
+own solo `03` on the demo vault fails that on 816 wedge-frames. They are not gates; whether they
+describe a real target or a wrong measure is an open question, and nothing was tuned to pass them.
+#### Both rings land together, and no wedge splits or merges mid-walk
+
+**Every wedge takes the whole window, so both rings land together.** The stagger used to sort
+every changing note on the disc into one clockwise sweep, so a ring whose changing wedges sat late
+in that sweep did its work in the back half: soloing `04 - Daily Notes`, the inner ring was half
+done at pr **0.69** while the outer ring's fan was half closed at **0.50**. Asked for: *"can we make
+inner and outer ring animations synchronized so they finish at the same time?"* A first fix gave
+each ring its own clockwise lap; the rings landed together, but a wedge still closed only when the
+lap reached it — see the next section for what that looked like and what replaced it.
+
+**A wedge splits or merges once, at the click** (`cellHold`). Whether a group earns sub-wedges, and
+which sub-piece each note lands in, is decided per frame from the ring's *walked* depth
+(`liveN ≥ pieces × depth`), so it flipped at whatever frame the walk crossed the threshold and every
+note in the wedge re-seated at once. Hiding `03 - Resources` on the maintainer's vault grows
+`02 - Areas` from one 19-note wedge to three (7, 7, 5) as the outer ring goes from six rows to five;
+the flip landed at pr 0.786 and threw a note two rows (93 units, 0.50 of a pitch) — **identically
+on develop**, so it predates this ticket. Each note's cell is now taken from the destination plan
+(the source plan's for a note that is leaving) for the whole cascade. Holding only the yes/no of
+the split was tried first and mis-landed 19 notes at settle, because the sub-piece assignment also
+reads the walked depth. Measured after: worst lit-note step **0.30 of a pitch**, nothing moving
+after the landing.
+#### A row dissolves, a hop glides, and the ring does not shift at 5.5
+
+Three more things the maintainer saw on his own vault, after the fan and the sync: *"the outer ring
+cleans smoothly, the inner does not, it stutters … in solo 03 there are jumps in the outer ring rows
+several times, same in hide 03, massive jumps in rows."* Every per-note step was inside the easing
+constant; what the checks did not count was **how many notes step in the same frame**.
+`scratchpad/186/rowdrops.mjs` counts hop *starts* per frame.
+
+- **The top row dropped as one block.** The row cap `floor(rows − 0.5)` changes for every note at
+  once when the walked count passes the half, so the whole top row fell a pitch together: soloing
+  `03 - Resources`, **53 notes in one frame** at pr 0.33 and again at 0.68. Each note's cap now
+  carries a deterministic offset of up to half a row (`rowCapOf`, an FNV hash of the id), so the
+  top row dissolves one note at a time across half the walk. At rest the offset is inert:
+  `floor(n − 0.5 − j) = n − 1` for every `j < 0.5`.
+- **A hop was a jump.** `RADIAL_EASE = 0.25` closes a one-pitch hop in about four frames — 67 ms —
+  which reads as a jump next to a ring that does not move at all. A hop is now capped at
+  `RADIAL_STEP_MAX = 0.12` of the ring's pitch per frame (inner pitch scaled by `INNER_SCALE`), so
+  it glides over about nine. The cap applies only while `pr < 1`; the tail after the landing keeps
+  `decisions/0003`'s convergence.
+- **The whole ring shifted at exactly 5.5 rows — on develop too.** `buildWedgePlan` takes the
+  band's outer extent from `round(thick / pitch) × pitch`, and `round` flips at the half, so
+  `maxR` stepped by a pitch, the github#160 inset with it, and **every outer note moved 0.05 of a
+  pitch in one frame** (431 of 445 on solo `03`, 384 of 395 on hide `03`), identically on develop.
+  The extent now takes the walked depth the frame already carries.
+
+Measured on the maintainer's vault after all three: the worst frame on solo `03` went from **431
+notes starting a move to 7**, and no frame on any act starts more than 8 except the click itself
+(hide `03`'s split, held there by design). Worst single step 0.12 of a pitch everywhere.
+
+- **The angle was still a jump (2026-09-26).** *"The animation for the last 0.5% is too jumpy."* The
+  cap above eased the radius and took the angle from the target outright, so a serpentine flip on a
+  row hop, and the re-spacing of every note in both rows when one note hops, landed in a single
+  frame: on the tag vault's last-0.5% walk, single-frame tangential moves of **3,887 units** (a wedge
+  width) with **20 of 24 notes** moving in that frame, the median frame at 9 units. The angle now
+  glides under the same easing and the same per-frame cap, measured as an arc at the target
+  radius, and its residual counts toward convergence, so the tail still lands exactly. After: the
+  largest capped frame is **67 units**, 6 frames over three times the median instead of 15, and the
+  only jumps left are notes under alpha 0.05, which snap by design. `scratchpad/186/walkjump.mjs`
+  is the harness.
+**2026-10-03 correction (github#186):** independent angular easing above is superseded. It
+bounded individual frame steps but allowed notes to escape moving wedges. Normal cascades now
+ease along each cell's serpentine and use the frame's shared boundaries; the fixed-angle fold
+retains its radial cap. A cell uses one row cap, and arriving notes start between surviving
+neighbours. `--only "a cascade keeps"` measures normal-motion Refresh and both directions of a
+date filter: no lit note outside its allocated wedge (0.01-degree numerical tolerance), no rank
+inversions along the path, at least 20 frames, and a converged exit. Golden layouts remain the
+resting-layout authority. The earlier smallest-covering-arc diagnostic can falsely include a
+neighbour when one wedge covers almost the whole circle, so it is not this regression's oracle.
+
+#### A switch took its lock over twice the vault
+
+The github#186 state tracking (`vg.bandTotal`, `vg.lockRows` at every check boundary) caught the
+fold check leaving the demo vault's ring split at 344/1059 where a fresh page has 322/1081, and the
+10k at 3031/6971 against 2753/7249 with one row fewer outside, which is the state the 10k
+live-rebuild check then failed on in suite order and passed alone. Traced with a hook in
+`takeGeom`: every lock taken *during* a switch saw a plan total of **2806 notes on a 1403-note
+vault**. `buildWedgePlan` declares a local `leaving` array for the skeleton's leavers, which shadows
+the page's `leaving` dict inside the function (since f5ab063), so its *"the arriving disc has no
+leavers"* skip never fired and the plan counted every stand-in beside its original. The doubled total
+moved the hub and the small-group threshold, and the ring balance chose differently. The local is
+`leavers` now; a switch's lock counts 1403, and the 10k comes home to **2753/7249** exactly. The demo
+still landed one swap off (308/1095) after that, and the trace named the second counter: `gapScale`
+took `graph.order`, which the stand-ins double for the length of a switch, so the seam gaps the
+balance is costed with were narrower than a fresh page's. It counts notes now, and the demo comes
+home to **322/1081**. `buildSubOrder` tallied stand-ins too, doubling the legend's subfolder counts
+during a switch; it skips them. Three counters, one rule: **a stand-in is its note, already counted.**
+
+#### A wedge closes at one rate, and the intro is not a ring arriving
+
+Two more, from the same review page. *"Solo 04: the inner ring wedges are not closing with
+constant speed, looks like it stutters."* `scratchpad/186/wedgespeed.mjs` records each group's
+`Σ alpha` per frame — the wedge's arc is proportional to it — and reports how much of the walk a
+wedge spends closing and its peak-to-mean rate. On solo `04` the inner ring's wedges closed **one
+after another**: `01 - Projects` in 28% of the walk, `05 - Weekly Reviews` in 38%, and the
+one-note `07 - Yearly Reviews` sat still until the last 13% (the github#67 deal gives a lone note
+the *end* of the stretch). Develop was burstier still (17% and 20%). A wedge that is still, then
+closes, then is still again is the stutter.
+
+- **Every changing wedge now spreads its notes over the whole window**, whatever the cascade: a
+  golden-ratio interleave through every cell of the source plan (leaving notes) and the
+  destination plan (arriving ones). The per-ring re-spread is gone — rings land together because
+  every wedge does. A ring going or coming whole is the exception: it goes by date (above).
+- **A small wedge fades slowly.** A 12-frame fade spaced 30 frames apart alternates between one
+  and two notes fading, so a 10-note wedge's rate swung 2:1. Each cell's fade is
+  `clamp(window × 3 / n, FADE_FRAMES, window)` (`fadeOf`), and its delays are spread over what is
+  left, so the last note lands on the last frame and a lone note fades over the whole walk. A wedge
+  of 24 notes or more keeps the standard fade. The github#67 radius deal (a single-cell wedge leaves
+  outside-in, arrives inside-out) keeps its order and takes the same fade and room.
+
+Measured after, solo `04`: every inner wedge closes over **58–73% of the walk at peak/mean
+1.06–1.19** (the outer ring's fan: 83%, 1.02–1.05); the same on solo `03` and on show-all;
+hide `03` unchanged at 74%, 1.00. Rows: no frame starts more than 6 hops except the click.
+
+*"Hmm, the old intro looks better, it also makes more sense since the intro goes over time."* The
+intro is a timeline walk — `cascade({ order: tlRank, totalMs })` — and it starts from an empty
+disc, so both rings read as *arriving whole* and opened as fans from 12, discarding the date order
+the sweep was drawn for. `bandBorn`, the interleave and the frozen plan now all require
+`!opts.order`: a timeline walk fills the disc note by note at each note's rest, as develop does,
+each ring growing from one row.
+#### The jump at the END of an animation, and the cap that caused it
+
+Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)
+held a band **below its own destination** whenever that rest has few enough notes that its pitch
+widens toward square (github#157), so `rows × pitch` exceeds the static thickness. The walk then
+snapped the difference at landing: soloing `04 - Daily Notes` on the maintainer's vault walked the
+inner ring at pitch **169** to the last frame and landed at **190** — **232 units, ten notes moving
+more than a row**, in the frame after the cascade. Nothing caught it because every criterion read
+only frames *during* the cascade.
+
+**A resting endpoint is legal by definition, so the cap converges onto it:**
+`cap = lock + (ts − lock)⁺ × (1 − ease)⁸ + (td − lock)⁺ × ease⁸`. Mid-walk it is the static
+thickness; at each end it is that end's own. The exponent is measured, not picked: at 4 the cap
+opened early enough to cross the rail on 2 frames soloing `misc` (1.013×), and at 8 it does not.
+A cap derived exactly from the rail — `T ≤ lock × rows / rowCap` — was tried and is **worse**: it
+steps whenever the row index changes (2 pitch steps, 9 rail frames on `misc`) and it ignores the
+outer ring's github#160 inset.
+
+**`SETTLE` in `pack-check.mjs` reads the frame after the landing**: no lit note may move more than
+one unit, radially or tangentially. It is the check `settle() is a no-op` always needed.
+
+### What is left, and is not this ticket
+
+- **github#132 closes as documented behaviour.** Its 1001 units decompose with no bug in them:
+  the inner band's row 0 is `r0 × INNER_SCALE` and its top rail is
+  `(r0 + (rOuter − r0) × INNER_FILL) × INNER_SCALE`, so 708 of the 1001 is those two constants
+  and the remaining 293 is exactly one pitch — the same relationship the unfiltered vault has.
+  What remains of the issue is that **a filtered band rests at ~6× the area per note**, with its
+  dots on both rings: with the radii static and fewer notes, that is what "still touching both
+  rings" has to mean. It wants this line in `invariants.md`, not a change.
+- **github#119's tail bucketing is a requirement of the definition, and is NOT in this ticket.**
+  A one-note wedge cannot touch two seams; 31 of the tag disc's 121 wedges rest at 0.52 coverage
+  before anything is toggled. That is the one **rest-state** change the umbrella still owes, and
+  *a resting wedge fills the arc its notes can* is written to allow it rather than to fail on it.
+- **The tag act still overshoots its destination density by 1.23×** around pr 0.85 (203877
+  against a rest of 32423..165725). The band survives and re-densifies 5× across that act, and
+  the excursion is in `lit`-note terms — the notes between alpha 0 and 0.5 are in the solve and
+  not in the count. It is reported by `pack-check.mjs` rather than hidden, and it is the smallest
+  of the five numbers this ticket moved.
+
 ## The hub stays the same share of the disc
 
 `r0`'s formula exists to hold the hub at a constant *fraction* — its own comment records
@@ -653,13 +1524,17 @@ and rejected for the clip.
 **Camera framing only, not layout**: `fitRatio()` reads no note position, so the golden snapshot
 is untouched at every ratio in the table above.
 
-The four smoke.mjs checks that assert what `fit()` lands on hold a plain literal, `0.954` in
-place of the old `1.04` — `"double-clicking the graph resets the view"`, `"fit frames the disc
-that is actually there"`, and the two auto-fit checks. `camReset()`, a `setState()` call that
-bypasses `fitRatio()` for test-isolation purposes only, is updated to the same `0.954` for
-consistency. The edge-stroke-width check's `at(1.04)` "rest" reference point is deliberately
-**not** touched — it is an arbitrary zoom-level sample next to `0.216`/`0.108`, unrelated to what
-`fitRatio()` promises.
+The constant used to be a plain literal, `0.954`, hand-copied into six places in `smoke.mjs` —
+`camReset()` (a `setState()` call that bypasses `fitRatio()` for test-isolation purposes only) and
+four checks that assert what `fit()` lands on: `"double-clicking the graph resets the view"`,
+`"fit frames the disc that is actually there"`, and the two auto-fit checks. That broke
+deterministically, across every fixture, the last time `FIT_RATIO` moved (1.08 → 1.04) — the exact
+failure mode github#111 removed: `__vg.FIT_RATIO` now exposes the raw constant, and all six sites
+read it live via CDP instead of holding a copy. The three checks that verify `fit()`'s clamp
+formula still recompute it against an independently-measured `reach`, so the live read does not
+make them tautological — only the hand-sync is gone. The edge-stroke-width check's `at(1.04)`
+"rest" reference point is deliberately **not** touched — it is an arbitrary zoom-level sample next
+to `0.216`/`0.108`, unrelated to what `fitRatio()` promises.
 
 ## A resize re-centres a fitted disc on the new stage (github#182)
 
@@ -1262,9 +2137,13 @@ Today a strict subset: demo **37 of 113**, 10k **2 of 2**, dominant-folder **2 o
 2026-09-08: the newest `touched` day is 2026-09-05 on the demo and dominant-folder fixtures
 and 2026-08-28 on the 10k, so *Today* and the 7-day chip light **0 notes on all three** — a
 check written against `new Date()` passes by asserting nothing, and does so more thoroughly
-every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
+every day as the ageing fixtures regenerate forward and the pinned ones do not (github#199). This is
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
+Since 2026-09-29 the demo vault's `--end` is pinned too (2026-09-22): its daily notes are named
+by date and filed into month subfolders, so it was never day-invariant, and its golden moved 31
+notes on the weekly regeneration of 09-27 (changelog-detail). The dominant-folder vault is now
+the only fixture that ages.
 
 ## The band's control row does not move when its state changes (github#70)
 
@@ -1403,6 +2282,42 @@ one afternoon, both plausible, both fitting the evidence:
 1. a parked mouse landing on a legend row — ruled out by `HEAD` passing in the same
    environment;
 2. `skipIndexation` — probably right, unprovable from that run.
+
+## The suite measures in a 1584x961 frame, and a headless run has to be put in it (github#155)
+
+`--window-size` is an **outer** size, and how much of it reaches the page depends on how much
+the browser keeps for itself. Every fit, clearance and density threshold in `smoke.mjs` was
+tuned in whatever that left over, and until github#155 nobody had written the number down.
+
+Measured 2026-09-21, same Chrome, same machine, same `--window-size=1600,1000`:
+
+| how it opens | `innerWidth` x `innerHeight` | `devicePixelRatio` |
+|---|---|---|
+| placed, `--app=<url>` (the tuned shape) | **1584 x 961** | 1 |
+| `--headless=new`, URL positional | 1584 x **905** | 1 |
+
+56px, 5.8% of the stage height, and it is not cosmetic. *The disc's density follows the notes
+on screen* on the 10k vault measured `diameter/step 0.81` against a `0.80` ceiling and **failed
+three runs out of three** headless, while passing headed every time — a shorter stage means a
+smaller disc, fewer pixels per lattice step, and dots that are relatively fatter.
+
+**The threshold did not move.** github#155's own wording is the rule: *a threshold that has to
+move for the machine is measuring the machine*. So the frame moves instead. `TUNED_VIEWPORT` in
+`scripts/smoke-shape.mjs` names `1584 x 961`, and a headless run reads what it actually got and
+resizes the **window** by the difference (`nextBounds()`, up to two passes).
+
+Two things about that, both deliberate:
+
+- **A real window resize, not `Emulation.setDeviceMetricsOverride`.** Several checks here set
+  their own metrics override and then clear it, and a clear drops back to the *window* — so a
+  baseline installed as an override would silently vanish after the first mobile check and leave
+  everything behind it measuring a different stage.
+- **Self-calibrating, not a hardcoded window size per platform.** Every OS and every Chrome mode
+  keeps a different slice of the window, so the only portable way to land on an inner size is to
+  measure what you got and correct. A Linux runner's chrome height is not this one's.
+
+A headless run that cannot reach `1584 x 961` **says so in its own output** rather than
+quietly reporting numbers that are not comparable to the tuned ones.
 
 ## A leaked Chrome on the debug port makes the suite measure a stale page
 
@@ -1665,6 +2580,48 @@ already lit, because a vault is not spread evenly in time. The visible consequen
 real vault — 0.70 of the strip crossed in the first ~5% of the run, then a crawl — is the
 vault's own distribution and not a regression; both evenly-dated fixtures sweep at 0.05–0.06
 at the same point. See `design/0007-timeline.md`.
+
+**A sample taken after a CDP round trip is not the first frame.** The cascade's first `step()`
+runs synchronously inside the click, and on a loaded machine the first `p.j` after a separate
+click eval landed at **0.248–0.336** of the strip (8–10 sweeping samples) and failed the check
+twice in three runs, with nothing wrong on the page. Both intro checks now take their first
+sample in the same eval as the click (github#139): first sample **0.002**, 22 sweeping samples,
+in every run since.
+
+## The intro lights the disc note by note, and the heat cells follow it
+
+The sweep above is the value side; this is the render side, and the two are asserted
+separately because a page can move the handle while nothing that draws follows it — the
+report behind github#139 described exactly that. What the renderer draws is `alpha[id]`
+(`nodeReducer` hides a dot at `alpha ≤ 0.004`), and the heat band tallies the same `alpha`
+in `heatCompute()` from `afterRender`, so counting both per frame is measuring the drawn
+state rather than the sweep value.
+
+```javascript
+__vg.alpha            // id -> 0..1, what the reducer and the heat band read
+__vg.heat.days[k].n   // a day's tally after the last afterRender
+__vg.lastCascade()    // { path, frames, exit } -- "animated"/"converged" for one uninterrupted run
+```
+
+Measured, at `timeScale 0.25` on the demo fixture (1403 notes): the first sample is **0 of
+1403** lit (the check allows 5% for the frame the click itself advances), lit never goes
+backwards and lands on the resting count (**1403**), the heat cells go **0 → 329** with no
+step back and land on the resting tally, and `lastCascade` is one `animated` run of 47–73
+frames ending `converged` — a second cascade started underneath the intro would reset that
+frame count, and `cascade()` → `stopPlay()` → `timelineFrame(true)` → `syncAlpha()` is the one
+path that lights every dot in a single frame. The load intro is asserted the same way in
+"__vg is present and the intro landed": `animated`, 229–330 frames at full speed, `converged`.
+
+`node scripts/smoke.mjs --only "intro"` runs all three.
+
+**Why the report read as "full from frame one" (github#139).** `record-demo.ps1` starts
+ffmpeg, sleeps 800 ms, then boots `demo.mjs`, whose clock starts after node start-up and the
+CDP attach — measured here, a driver-logged click at 0.71 s landed 2.36 s after the driver was
+spawned. Frames pulled at video times before that offset show the demo page at rest (fully
+lit, by design), and a frame after the sweep has passed ~0.97 shows it full again. The take's
+frame times are on the video clock; the beat times are on the driver clock. Every drive of the
+intro measured for the ticket — headless click, fresh load, the tree from the issue's date, a
+real 1368×1350 window under the real driver — grew from 0.
 
 ## The window's travel is what the history exceeds the window by
 
@@ -2455,14 +3412,17 @@ click) edge running under a dim note used to lose a bite of itself to every disc
 crossed — a well-connected hub read as dashed instead of solid (issue #2).
 
 ```javascript
-__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+await __vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
 ```
 
 Selects the best-connected note, composites the canvases in stacking order, and samples
 every lit curve at 1% steps, keeping the samples that fall geometrically inside a
 non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
 is still running under it. Not frame-sensitive: the check selects rather than hovers, so
-`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight. **Returns a `Promise`**
+(github#101) — it waits a real composited frame (double `requestAnimationFrame`) between its
+own `render()` and its own pixel read, so a caller must `await` it; reading synchronously
+samples whatever was on screen before this call, not after.
 
 Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
 452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
@@ -2854,6 +3814,18 @@ The cost is the live half of the heatmap-window check on that one vault, which t
 ageing vaults still carry. Re-recording the 10k golden means choosing a new `--end` in both
 scripts in the same commit.
 
+**The demo vault was not day-invariant either, and is pinned too (github#199).** The 3.5-year
+measurement above compared two dates that happened to agree. `04 - Daily Notes/` holds dated
+daily notes beside a `2025-06/` month folder, and the exporter walks each directory sorted, so
+as `--end` moves a note's name crosses `2025-06` in that order: same notes, different node
+order, and the layout breaks ties on node order. Measured on `develop@67c285b` with
+`--only golden`: **`--end` 2026-09-14…09-22 ok; 09-23…09-26 3 notes moved (worst #424, radius
+1754.4 → 1105.9); 09-27…10-04 31 moved (worst #855, angle −83.0° → −143.8°)**. It surfaced on
+2026-10-04 as the first refresh after the last stamped pass. That window is develop's golden; the
+github#186 merge brought the golden re-recorded at `7cbdf7a`, which holds for `--end` 2026-09-20…09-22
+only, so the demo fixture is generated with `--end 2026-09-22` in both scripts. The shape vault is the
+one fixture left ageing, and it carries the live half of the heatmap-window check alone.
+
 **Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
 same defect as the section just above (github#21), for POSITION rather than SIZE: a
 still-running cascade's next animation frame can land after a bare `applyLayout(false)` —
@@ -3036,6 +4008,58 @@ tag (891) and spec (287) — and `spec-vault` is the one that could have moved, 
 spec-carrying vault with nothing stored opens in explorer mode, so its golden *is* the
 spec-ordered layout. It did not, because its only `order-desc: a-z` runs over zero-padded
 `YYYY-MM` folders, where numeric and plain collation agree.
+
+## No real folder segment survives into the mirror
+
+github#191. `scripts/make-mirror-vault.mjs` promises a mirror that can be recorded and shared in
+place of the real vault, and until this it only invented **note** names and **person** folders:
+`mapDir()` kept a folder's name unless `looksLikePerson()` said otherwise, so a numbered
+top-level folder and every project and employer name beneath it were copied verbatim. Three
+`.obsidian` files (`daily-notes.json`, `templates.json`, `app.json`) were copied byte for byte,
+and each can name real folders. Measured by the maintainer on a real 715-note, 79-folder vault:
+the mirror carried the real top-level structure through.
+
+```bash
+node scripts/make-mirror-vault-selftest.mjs     # the hook and both workflows run it too
+```
+
+The rule, and what the check asserts on a 16-note, 9-folder fixture with distinctive names:
+
+- **Every folder segment is invented**, seeded like the notes (`newFolder()`, drawn from `NOUN`
+  and `TOPIC`, `Adj noun` once those run out), unique across the mirror and **never equal,
+  case-insensitively, to any real segment of the source** — so an invented word cannot reproduce
+  a real one by coincidence. A person folder under a people parent still gets a person name.
+- **Only shape survives.** A name that is wholly `DATEISH` (`2024`, `2024-Q3`, `2025-W07`) is
+  kept. Otherwise `FOLDER_PREFIX` — `/^[_\d][\d_.\s-]*(?:[QW]\d{1,2}[\s_.-]*)?/i` — keeps the
+  leading number/underscore run and any quarter or week token, and the remainder is invented:
+  `01 - Projects` → `01 - Meadow`, `_ Archive` → `_ Printing`, `2024-Q3 Planning` → `2024-Q3
+  Beacon`. A name like `3D models` keeps its `3`, which is harmless.
+- **The three `.obsidian` files are rewritten from a key whitelist, never copied.**
+  `daily-notes.json`: `folder` (through `mapPath`), `format` (not a path), `template` (a note,
+  resolved to the mirrored note's path). `templates.json`: `folder`. `app.json`:
+  `attachmentFolderPath`, `newFileFolderPath`, `userIgnoreFilters` (each entry mapped, a trailing
+  `/` kept). A path that does not resolve is **dropped**, and so is every other key — the two
+  producers read only `folder` from the first two files (`src/build-graph.mjs`,
+  `plugin/build-data.mjs`), and nothing reads `app.json` at all. The summary line counts the
+  drops (`2 path(s) dropped as unmappable` on the fixture: an attachments folder holding no
+  notes, and an ignore filter naming a folder that does not exist).
+- **The sort spec follows the new names for free**: `mapPath` already routes through `dirMap`.
+  The check reads the translated spec back and asserts its pins and `target-folder:` lines name
+  the invented folders.
+
+The check's hunter takes every non-date real segment, strips its kept prefix, and greps the
+remainder (≥ 3 chars, case-insensitive) against every mirror **path** and every mirror **file's
+contents** — tree, `.obsidian/*.json` and the spec's front matter alike. A negative control runs
+the same hunter over the source fixture and requires 10 of 10 hits, so a hunter that went blind
+would fail before the real assertion could pass vacuously. Two runs at seed 1 must be
+byte-identical and a run at seed 2 must differ. Driven against the pre-fix generator
+(`5c223d3`) it fails **7 of 24**, the leak line naming both folder segments in `app.json` and the
+`01 - …` folder in the tree; against the fix, 24 of 24.
+
+One consequence to know: `newFolder()` consumes the seeded generator, so a mirror at seed 1 has
+**different person and note names than the same seed produced before github#191**. Nothing in the
+repo depends on a mirror's names — the golden snapshots and the fixture store exclude it on
+purpose (see "The vault generators are day-independent").
 
 ## A vault's layout matches its golden snapshot — the sortspec paths
 
@@ -3493,6 +4517,40 @@ same kind of reason.
 simulation: it proves the handlers work and that a lost layer comes back, and says nothing about
 how often monitor power-saving, a driver reset or a GPU switch actually causes this in the field.
 The issue was explicit about that, and no field frequency was measured.
+
+## A translucent colour never renders brighter than its opaque self
+
+The engine blends with `gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)` and the canvas composites
+as premultiplied, so what a shader writes **must already be multiplied by its alpha**. Written
+straight, a colour at alpha `a` keeps its whole RGB and only takes `(1 - a)` of what is under it:
+it comes out brighter than the same colour opaque, and two translucent edges crossing saturate to
+white. Every program premultiplies right after the `bias` multiply (github#190) — the two edge
+programs, the circle's two border colours, and the halo — and nothing else in the pipeline may
+touch RGB after that.
+
+Nothing at rest shows it, because every dot and edge at rest is opaque. It shows the moment an
+alpha ramps: a departing note's links went *up* in brightness as they faded, bundled into a white
+web where they crossed, and vanished together at the hide threshold, which is what the github#186
+clip reviews called an edge flash and a hard cut.
+
+Measured on a synthetic quad under that exact blend, grey 0.8 at alpha 0.3 over a `#202020`
+page, and on the demo vault's hide clip at slow ×4:
+
+| | straight (before) | premultiplied (after) | expected |
+|---|---|---|---|
+| one quad, alpha 0.3 | 226 | 83 | 84 |
+| two quads crossing, alpha 0.3 each | 255 | -- | 120 |
+| demo hide, largest frame step (mean abs grey /255, 180² frames at 40 fps) | 15.49 at the cut | 6.47 | -- |
+| demo hide, mean luminance: rest → peak while the links fade | 42.8 → 55.6 | 42.8 → 42.9 | no rise |
+| shape solo, largest frame step / luminance peak | 21.79 / 64.0 | 9.0 / 42.5 | -- |
+
+### Verify
+
+```bash
+node scripts/render-diff.mjs --against-dir <refs>   # a rest frame has no alpha: 0 pixels differing
+node .ai-context/investigations/186/probe-186.mjs --html <page> --out <dir> --act "eye:<group>" --film --slow 4
+# then the mean luminance of the clip's frames must not rise above its first frame while the links fade
+```
 
 ## A torn-down mount holds nothing outside its root
 
@@ -3979,6 +5037,20 @@ banners kept. What it did not do was stop the prose coming back, and 386 lines o
 still there on 2026-09-06 (392 on `develop@fc7d157`): JSDoc blocks whose lines carry no tag,
 the ribbon icon's design notes in `plugin/main.js`, the `.d.ts` file's explanation of itself,
 `build-plugin.mjs`'s strip-marker essay.
+
+**And the ratchet is not self-enforcing across a batch of merges — github#188.** Nine tickets
+merged into `develop` in one session took it from **exactly 0 over to 272 over** (299 by the time
+it was worked), most of it in the suite's own infrastructure. No single branch was far enough over
+its own diff to notice, several correctly read the already-red gate as pre-existing debt outside
+their ticket, and the merge verification never ran this check at all. **The dominant failure was
+not a missing pointer but a pointer with an essay after it** — the label cap is 60 characters, and
+a `// github#151 -- ` prefix repeated down four wrapped lines fails on every one of them.
+
+github#188 converted the **327** lines that were not present at the pre-drift commit, leaving the
+**350** the baseline had already sanctioned, and lowered `BASELINE` 378 → **350**. Two rules it
+leaves behind: a comment whose reasoning does not fit in 60 characters belongs in `.ai-context/`
+with a pointer at the call site, and a merge into `develop` is the boundary where this check has
+to run, since the count is an aggregate no single branch can see.
 
 ```bash
 node scripts/check-comments.mjs          # counts per file, the total, the baseline
@@ -4506,9 +5578,13 @@ alias index, so the plugin grows a `ghost:Nickname` the exporter does not. Adopt
 answer would delete real edges, so the exporter keeps its aliases.
 
 **One node-shape divergence found by inspection, not by a check (github#152).** `VaultNode`
-(`src/page.js`) is the one written contract both producers are supposed to satisfy, and
-`tsconfig.contracts.json`'s `checkJs` program only names `plugin/main.js` and `src/page.js` —
-`src/build-graph.mjs` is never type-checked against it. The exporter's ghost object literal
+(`src/page.js`) is the one written contract both producers are supposed to satisfy, and at the
+time `tsconfig.contracts.json`'s `checkJs` program named only `plugin/main.js` and `src/page.js` —
+`src/build-graph.mjs` was never type-checked against it. **That gap is closed (github#156):** the
+exporter is in `tsconfig.contracts-node.json` and its ghost literal is annotated `RawNote`, so
+dropping either field is a `TS2322` at the keystroke. The check below stays, because it reads the
+`@property` list out of the JSDoc and so also catches a field added to `VaultNode` that the
+exporter never learns about. The exporter's ghost object literal
 omitted `dirs` and `touched`, both declared required, while the plugin's already carried both;
 `page.js`'s own fallbacks (`n.dirs || []`, a missing `touched` reading as `""`) absorbed the gap,
 so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now reads `VaultNode`'s
@@ -4516,6 +5592,93 @@ so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now re
 emits carries all of them, `dirs` as `[]` and `touched` as `""` — so a producer that drops a
 required field fails the check that already builds the ghost fixture, instead of surviving on
 the page's fallback until the next doc pass notices by eye.
+
+## Both producers emit one shape, and a difference has to be declared (github#149)
+
+`src/build-graph.mjs` reads a filesystem; `plugin/build-data.mjs` reads Obsidian's
+`metadataCache`. They build the same `VaultData` for the same page, and until github#149 nothing
+put their outputs next to each other — so what held them together was that someone had copied the
+policy across correctly and would keep doing so. The plugin's own header said as much: *"ported
+from `src/build-graph.mjs`, line-for-line"*.
+
+**What the port had already cost, twice.** github#141: both adapters keyed a ghost by basename,
+so one defect had to be found and fixed in two places. github#152: the exporter shipped ghosts
+with `dirs` and `touched` missing outright while the plugin's carried both, and `page.js`'s own
+fallbacks absorbed the gap — working software, and a shape nothing could rely on.
+
+**Measured on `98c91e7` before the change**, matching the two sources for the policy they share:
+
+| | |
+|---|---|
+| byte-identical duplications | **7** — `MONTHISH`, `TYPE_ALIAS`, `SKIP_FILES`, `deNumber`, `slug`, `singular`, `norm` |
+| near-duplicates | **5** — `under`, `inferType`'s body, `paraDirs`'s body, the ghost literal, the tag normaliser |
+
+The five are the number that matters: they differ only in path separator, in a module constant
+versus a parameter, and in `??` versus `||`. None changed behaviour that day. Each was one
+careless edit from doing so, and nothing would have caught it.
+
+**The invariant.** The policy lives once, in `src/taxonomy.mjs`; the shape is declared once, in
+`src/contract.mjs`, cross-checked against `src/page.js`'s own typedefs; and a difference between
+the two hosts is legal only when `DIVERGENCES` names it and says why. **A declared divergence that
+stops happening fails too** — without that half the list becomes an allowlist, and the first
+genuinely new difference to land on one of those keys is waved through. Five are declared today:
+`dev` and `folderOrder` are the exporter's alone, `readWords` and `_spike` are the plugin's, and
+`words` is `0` on every plugin node until the deferred read has run.
+
+**The alias divergence is declared and deliberately not checked here.** The exporter resolves
+frontmatter aliases; Obsidian's cache does not, so `[[Nickname]]` reaches an aliased note in the
+standalone and becomes `ghost:Nickname` in the plugin (github#141). It moves which **nodes** exist,
+not which **fields** they carry, so it belongs to resolution — and `check-link-resolution.mjs`
+owns resolution, pinned against Obsidian's own cache.
+
+**Check:** `scripts/check-producer-contract.mjs`, in the hook and at the merge boundary — 59
+assertions, about a second, no Chrome and no Obsidian. It runs the exporter as a subprocess and
+the plugin's adapter in-process against a fake host, over one nine-note fixture, twice: once
+plain and once with `--flat-months`, which is the one shared rule that takes a parameter.
+The fake host is handed `resolvedLinks` / `unresolvedLinks` as **fixture data**, so the
+comparison is of everything downstream of resolution and is not circular.
+
+Each of these was applied to the tree, the check run, and the change reverted:
+
+| mutation | caught by |
+|---|---|
+| the exporter drops `sub` | `validate()`, and the shape diff |
+| either producer grows an undeclared field | `validate()`, and the shape diff |
+| the plugin changes one field's value policy | the value diff, node for node, in both flat-month states |
+| the **shared** month rule changes | the fixture's own policy assertions |
+
+The last row is the one to read twice. A change to `src/taxonomy.mjs` reaches both producers at
+once, so by construction it is **not** a divergence and the cross-producer diff stays silent —
+which is what sharing the policy is for. The fixture assertions are what hold the rule itself: a
+month folder never names a type, a month folder ends the walk, and `--flat-months` drops it rather
+than keeping it as a sub. A first draft of those assertions **passed under that mutation**, because
+each only checked a case where both readings agree; the note buried under a month folder is in the
+fixture because of it.
+
+**Sharing the policy found two live defects on the first read, and both are pinned in the
+fixture.** Neither was introduced by the merge; both had been sitting in the duplicated halves.
+
+- **`type: constructor` in frontmatter returned a *function* as `node.type`.** `TYPE_ALIAS` is a
+  plain object literal indexed by a user-written value, so `TYPE_ALIAS["constructor"]` is
+  `Object.prototype.constructor` before anything is stored — github#97's class exactly, one level
+  up from the planner maps that invariant covers. It is the **only** reachable name: `fm.type` is
+  lowercased first, so `toString` and `hasOwnProperty` miss, and `constructor` is already
+  lowercase. The map has a null prototype now, in the one place both hosts read it.
+- **The plugin counted one word too many on a note carrying a byte-order mark.** It matched
+  `^---` against the BOM-stripped text and then sliced the **original**, so the body kept one
+  character of its own frontmatter: measured **7 words against the exporter's 6** on the same
+  note. The exporter was right — `parseFrontmatter` sliced the string it had matched. `noteBody()`
+  is that rule in one place now, and both producers call it.
+
+**And the check had a hole that let the second one through.** `words` was declared a
+`field-value` divergence, which exempted it from the node-for-node comparison altogether — so the
+one field where the two hosts provably disagreed was the one field never compared. It is a
+`deferred-value` now: the gate asserts the zero state before `readWords()` (which is what actually
+diverges — the *timing*) and then compares the value like every other field.
+
+**Behaviour unchanged, measured both ways:** the exporter's output on a fixture vault is
+byte-identical to `98c91e7` with `generated` excluded, and `check-link-resolution.mjs` — which
+builds real vaults and asserts exact edges, ghost identities and degrees — passes untouched.
 
 ## A folder can be named after anything on `Object.prototype`
 
@@ -4596,7 +5759,7 @@ does not build ends the run before Chrome starts. The same walk makes a stamp na
 now-corrupt fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a
 scratch store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both
 callers require the pass line, not exit 0 alone:
-the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
+the CLI realpaths itself against `argv[1]`, because through a junction (a worktree reached that way)
 the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 
 ```bash
@@ -4640,9 +5803,122 @@ trusted.
 
 Keyed by tree and not by commit because the merge into `main` is a new commit by construction
 while its tree is not; not by time because `develop` moves several times a day and "a recent
-green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
-`suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
-blocks the push and names the holder rather than running on top of it.
+green run" cannot say which tree it saw. While it runs, both gates ask the optional harness hook
+(`.ai-context/harness-hook.md`) for the `suite` hold and release it on every exit path; a hold that
+cannot be had blocks the push rather than running on top of it. With no hook configured neither
+gate takes anything.
+
+## Widening the suite's concurrency surfaced one real race and one window-size artifact
+
+github#101 asked whether the serial (frame-reading) lane's 76% share of a run (github#93,
+above) could be shrunk by widening it, and whether doing so would flake more under
+contention. `smoke.mjs` gained two levers: `--jobs <n>` (already existed) is the width of the
+whole pool; `--serial-jobs <n>` (new, default 1) is the width of just the walk sub-pool inside
+it -- `--serial-jobs 3` lets the three fixtures that carry a frame-sensitive check (demo-vault,
+test-vault, tag-vault) read their frames at once instead of one at a time. Either flag above
+its default is a delta from the shape the gates push with (`suite-stamp.mjs`'s `shapeDeltas`),
+so a run using them never stamps the tree, the same as `--only` or `--vault`.
+
+**The experiment measured three shapes, five runs each, interleaved (not five-in-a-row) so
+machine drift would not land on one shape, every run under the `suite` lock:**
+
+| Mode | Flags | Wall (avg / min / max) | FAILs across 5 runs |
+|---|---|---|---|
+| default | *(none)* | 428s / 366s / 674s | 1/5 -- "a swipe in the tail of a fit flight still scrolls" (demo-vault) |
+| fast | `--jobs 5` | 301s / 299s / 307s | **5/5** -- "focus web stays above dim notes" (dominant-folder vault); **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+| serial3 | `--jobs 3 --serial-jobs 3` | 307s / 305s / 308s | **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+
+428 checks across the suite's five current fixtures (158 + 80 + 63 + 64 + 63). The default
+mode's own wall time is a wide range (366-674s) because one of its five runs queued behind
+unrelated work also holding the `suite`/`screen-left` locks at the time -- 366s is the more
+representative number; the other two modes' runs happened not to collide and read tight
+(within 8s of each other).
+
+**The one default-mode failure is the flake already on record** (github#93's own note: a
+1-in-6-to-8 rate on two checks, reproduced isolated) -- 1/5 here is consistent with that rate
+and is not new. **The other two are not that** -- both reproduced on every single run of the
+shape that triggers them and on zero of the five default runs. Investigated, and the two turned
+out to be two different things, not one:
+
+**"focus web stays above dim notes" was a genuine test race, and is fixed.**
+`checkFocusWeb()` (`src/page.js`) calls `renderer.render()` then immediately reads the canvas
+with `getImageData` -- synchronous in the JS thread, but the actual GPU composite is not
+guaranteed to have landed by the time the read happens, and under GPU contention from several
+concurrent Chromes it measurably had not: the check reads a not-yet-painted frame and finds the
+highlighted edge still under a dim note that has not yet been drawn over.
+
+**First attempt was wrong, and worth recording why.** A double-`requestAnimationFrame` wait --
+the fix this codebase already uses for exactly this class of bug, in the PNG-export and
+camera-zoom checks -- placed in `scripts/smoke.mjs` *ahead of* the call to `checkFocusWeb()`
+looked fixed (5x `--jobs 5` + 5x `--jobs 3 --serial-jobs 3`, previously 5/5 failing both, 0/10)
+but only because that verification ran the density check first in the same `--only` selection,
+and its several `sleep(400)`s incidentally gave the GPU enough slack regardless of where the
+wait sat. Re-run with *only* the focus-web check selected -- the true test, since
+`checkFocusWeb()` does its own `render()` and its own read internally, after anything a
+preceding wait in `smoke.mjs` could reach -- and it failed 5/5 under `--jobs 5` again, byte
+identical to the original failure. The wait had to be *inside* `checkFocusWeb()`, between its
+own `render()` and its own pixel read, not before the function is even called.
+
+**The real fix**: `checkFocusWeb()`'s pixel-sampling body is now a named inner function
+(`sample()`), called only after a double-`requestAnimationFrame` `Promise` resolves;
+`cdp.mjs` already evaluates with `awaitPromise: true`, so returning a `Promise` from a debug
+API function needed no change on the calling side. `checkFocusWeb`'s JSDoc return type updated
+to `Promise<unknown>`; one `no-unsafe-assignment` lint finding surfaced from `best`'s type no
+longer narrowing across the new function boundary, fixed with an explicit `@type`. **Verified
+in true isolation this time** -- `--only "focus web stays above dim notes"` alone, nothing else
+in the selection -- 5x `--jobs 5` and 5x default, **0/10 failures**, plus `npm run lint` and
+`npm run typecheck` both clean.
+
+**"the disc's density follows the notes on screen" is not a bug -- it is a window-size
+dependency in a pixel-based check, at a width nobody plans to ship.** The check measures a
+dot's on-screen diameter against its on-screen step (`__vg.debugDump()`'s `dotRadius` and
+`step35`, both screen-pixel quantities derived through `renderer.graphToViewport`), and the
+product **intentionally** sizes dots relative to the frame they are drawn in ("Size dots from
+the frame", `CLAUDE.md`'s own laws) -- a smaller browser window legitimately produces a smaller
+dot-to-step ratio. `smoke.mjs`'s pool tiles each lane's window into a `gridSlot` sized by the
+lane count, so a wider pool means a smaller window *for every job in it, not just the walk
+ones*: confirmed by disentangling the two variables directly -- `--jobs 5 --no-grid` (same
+width, full-size window) passes with `diameter/step` topping out at 0.76, against 0.81 with
+the grid on; an isolated run at the default `--jobs 2` grid width passes at 0.57. The check's
+own threshold (0.15-0.80) was calibrated against the one window size the suite has ever run
+at -- the default 2-lane grid -- and this ticket is the first time anything ran the suite at
+`--jobs 5` or `--jobs 3 --serial-jobs 3` at all. **No code changed for this one.** It is left
+exactly as it was: the check is correct, the product is behaving as designed, and the
+"failure" only exists at pool widths this ticket already decided (D-4) will never be the
+shipped default -- fixing it would mean loosening a real threshold to accommodate a shape
+nobody runs, which is the wrong direction to move a regression check.
+
+**The recommendation is unchanged: the default lane shape does not stamp differently, and does
+not change.** Per D-4 this ticket never changed the default regardless of outcome. The wall-time
+win (~120-370s) from widening either pool no longer comes bundled with a real defect -- the one
+genuine bug is fixed -- but it still surfaces a check whose assertion window assumes the
+default's window size, which is reason enough on its own not to make either wider shape the
+default without first deciding whether pixel-based checks should be exempted from the grid,
+sized on their own window, or something else. That is a design question, not a bug report, and
+is out of scope here.
+
+**A full default-shape suite run was attempted as a broader regression check on the
+`checkFocusWeb()` change and did not complete** -- the harness killed it for machine-wide low
+memory while other worktrees were also driving Chrome, not a failure of the change itself. What
+did run clean: `npm run lint`, `npm run typecheck`, every static gate, and the targeted
+isolation runs above (10/10 at default and `--jobs 5` for the fixed check). The wider run is
+safe to retry later; it was not repeated here per the standing instruction not to re-launch
+something the memory reaper stopped.
+
+`scripts/suite-repeat.mjs` runs the suite `k` times per named mode (`--mode name=args`,
+repeatable), taking and releasing the `suite` lock around every run so it never collides with
+a fixture-regenerating run elsewhere, logging each run's full output, and tallying wall time
+and FAIL counts per (fixture, check) per mode; `--tally <dir>` re-reads a directory of logs
+without running anything. Its parser has one trap worth naming: `smoke.mjs` prints "FAIL" on
+two different lines -- a per-check line (`" FAIL  <name>"`, one leading space) and the
+end-of-run per-vault summary (`"  FAIL  <ran>/<total>  <label>"`, two) -- and the first cut of
+the parser matched both, counting a whole vault's fail tally as a single fabricated "check"
+named after its ratio. The fix is the leading-space count, not the word. A second trap in the
+same file: `--mode name=args` first tokenised `args` on bare whitespace, which breaks the
+moment a `--only` value is a check name with spaces in it -- exactly the case needed to isolate
+either finding above. Fixed with a small quote-aware tokenizer (`"..."` and `'...'` both
+group), so `--mode 'fast=--only "focus web stays above dim notes" --jobs 5'` now reaches
+`smoke.mjs` as one argument, not several broken ones.
 
 ## The merge boundary runs the gates the hook runs
 
@@ -4768,7 +6044,11 @@ being the ones the disc draws, which is the only thing the preview is claiming.
 
 ### The quartet is a reference scale, not a bound
 
-`PREVIEW_R_PX` is `[0.35, 0.65, 1.38, 2.19, 4.06]`, a **reference scale, not a bound**. A radius
+`PREVIEW_R_PX` is `[0.35, 0.8, 1.6, 3.0, 5.4]`, a **reference scale, not a bound**. It was
+`[0.35, 0.65, 1.38, 2.19, 4.06]` until 2026-10-16: github#171 made a dot scale with the disc and
+github#202 let a typical dot fill its room, and the demo median went from 1.47 px to 3.35 px at
+the tuned 1584x961 and 5.28 px in the 2544x1353 window the harness placed, outside 4.06. The
+pre-push suite on `5640517` failed the resemblance criterion below on exactly that. A radius
 falls out of the vault's size and the viewport's together, and the three fixtures span 0.39 to
 5.93 px, so no fixed set of numbers can bracket every disc. The first cut of the check asserted
 every live dot fell inside the scale and **failed on the 10k fixture at 0.42 px** -- the
@@ -4784,11 +6064,17 @@ Two criteria, both asserted on every fixture:
 1. **Coverage** -- the smallest previewed radius is no larger than the smallest the disc draws.
 2. **Resemblance** -- the previewed range brackets the disc's median dot.
 
-| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside 0.35-4.06 |
+| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside the scale |
 |---|---|---|---|---|
-| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes |
-| 10k synthetic | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes |
-| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes | yes |
+| demo (1403 notes), before github#171 | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes, 0.35-4.06 |
+| 10k synthetic, before github#171 | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes, 0.35-4.06 |
+| dominant-folder, before github#171 | 954 | 1.38 / **2.10** / 3.07 px | yes | yes, 0.35-4.06 |
+| demo, 1584x961 (headless), 2026-10-16 | 1403 | 2.24 / **3.35** / 4.84 px | yes | yes, 0.35-5.4 |
+| demo, 2544x1353 (harness window), 2026-10-16 | 1403 | 3.50 / **5.28** / 7.67 px | yes | yes, 0.35-5.4 |
+
+The check asserts on the demo fixture only, in whatever window the harness places, so the
+resemblance criterion now depends on that window: a dot scales with the disc. 5.4 px brackets
+the median up to the 2544x1353 window measured here; a larger one can fail it again.
 
 Doubling or halving dot size breaks the second; drawing anything under 0.35 px breaks the first.
 
@@ -4847,7 +6133,8 @@ Coverage now runs at both, and in the plugin as well:
 **The chip has to be big enough to read, and 34 px was not.** Twenty dots in a 32x40 drawing
 leaves about 2.4 px between them and nothing reads at a glance. The drawing is **48x40** and the
 chip **50x42**, giving roughly 5 px of gap, which is what lets the 0.35 px sample read as a
-smudge beside an 8 px dot rather than as noise. Measured before changing anything, because the
+smudge beside an 8 px dot rather than as noise. Since 2026-10-16 the drawing is **48x52** and
+the chip **50x54**: four 13 px rows hold the 5.4 px top sample with about 2 px between rows. Measured before changing anything, because the
 obvious guess was wrong: Obsidian's `setting-item-control` is a fixed **369 px at both a 1600 px
 and a 900 px window**, and the chip measured exactly 34x42 in both. They were never compressed,
 only small. The cost is height -- four per line instead of six, three lines instead of two, and
@@ -5093,10 +6380,10 @@ the mark drops to zero and the whole list is audited rather than the remainder t
 
 **What this does not do.** Nothing catches an error the page has not thrown yet: a timer left
 running further out than the final grace throws into nobody's window, and no finite wait would
-change that. And successive checks still share one page — the **error list's** boundary is
-deterministic now, the **page state's** is not, which stays open. The year-hover discrepancy
-(32 highlighted against 30 notes, passing when rerun alone) remains a hypothesis about that
-shared state; nothing here diagnoses or fixes it.
+change that. And successive checks still share one page — the **error list's** boundary was
+deterministic from here, the **page state's** was not. That half was closed by github#151, two
+sections down; the year-hover discrepancy (32 highlighted against 30 notes, passing when rerun
+alone) remains a hypothesis about that shared state, and neither ticket diagnoses or fixes it.
 
 Measured 2026-09-14. `scripts/smoke-runner-selftest.mjs` holds **34 regressions: 9 fail with the
 audit removed and nothing else changed, 0 with it** — among them the two the ticket names, a
@@ -5164,6 +6451,220 @@ four fixtures) and `the disc's density follows the notes on screen` (17.5 s) alo
 of sleeping under reduced motion. Converting those waits to `settle()` plus one frame is the
 next cut, taken separately so each check's own numbers are re-read when it changes.
 
+## A check leaves the page as it found it, or says what it leaves (github#151)
+
+github#146 made the **error** boundary around each check deterministic and left the **state**
+boundary open — its own D-6, and the last paragraph of the section above. One page serves every
+check in a job, so a check inherits whatever camera, selection, filter, panel and cascade state its
+predecessors left. github#112 was one instance found by a person rather than by a gate. The ticket
+that asked for both also said *"preserve all existing thresholds and snapshots"*, and resolving that
+blind would have been guessing — so this was measured first.
+
+**The fingerprint.** `scripts/smoke-state.mjs` carries one page-side expression that answers with a
+flat map of the observable state: `__vg.state`; the camera; every rendered `input`/`select` and
+every rendered `[aria-pressed]` under the root; each named panel's open flag; the root's `data-*`
+attributes; the stored settings blob; and the handful of `__vg` getters that are not in `state`.
+It is generic on purpose — a toggle added later is fingerprinted without anyone remembering to add
+it here — and three of its rules were each earned by a measurement rather than chosen:
+
+- **Only what is rendered.** The settings body, the detail card and the context menu are built on
+  first use and then hidden, so the first check to open one reported every control inside it as
+  newly present — **six of the twenty-two** leaks the boundary first caught, none of them anything
+  a later check could act on. A panel genuinely left open still shows, as `open.<id>` and as its
+  controls together. The cost is that a value changed while its control is hidden is not seen; the
+  next check has to open the panel to reach it, and opening syncs it.
+- **A control with no id of its own folds into its container.** A legend folder, a colour swatch,
+  a detail-card button — there are hundreds. Hiding one folder took `state.hidden` off baseline
+  and, with a key per row, reported **90 more that were only its consequence**. Each container now
+  answers with one order-independent digest (`press.vg-legend  35 rows #9b9bb64e`), so a rebuild of
+  the same rows does not move it and a real change still does.
+- **A state key's token is its full accessor.** The read set matches `state.hidden`, never a bare
+  `hidden`, which matched `renderer.getNodeDisplayData(id).hidden` across a third of the suite and
+  reported **15 reads of `state.hidden` that were nothing of the kind**.
+
+**The audit.** `--audit-state <file>` samples the fingerprint at each check boundary and wraps
+`page.eval` for the duration of the check, so a run says what each check changed, what it left off
+the job's baseline, and which keys a later check's expressions could reach. **The read set is an
+upper bound and is reported as one**: an expression naming `__vg.state.selected` may never branch
+on it. It narrows 158 checks to a shortlist; it does not prove a dependence.
+
+**The boundary.** A check that took a key **off the job's baseline** fails, naming the key and both
+values: `left the page off its baseline: cam.ratio 0.954 -> 0.4071`. Off baseline **now**, at
+baseline **when it started** — deliberately not "changed since the last boundary", which would fail
+a check for putting an inherited key *back*, and would make one unfixed leak fail every check after
+it. Same shape as github#113's `left the page busy`. A check that legitimately ends elsewhere
+declares it — `leaves: ["state.hidden"]`, or a `"state."` family prefix — which puts the coupling in
+the source instead of in the order the checks happen to run in. `--no-state-boundary` turns it off
+and, like `--audit-state`, marks the run as not the full suite.
+
+**A remount per check is not on the table at any price, and that is a fact about the page, not a
+budget.** `mountVaultGraph()` is called inline from `src/shell.html`; `destroy()` exists and nothing
+re-mounts. Offering one would mean shipping a test hook in the product, which is the thing the
+harness does not do. So the choice was between a reset and a declared boundary, and the measurement
+said the boundary: **24 leaking check runs, 16 distinct checks, 10 distinct state keys** — not the
+sixty that would have made per-check restoration hopeless.
+
+Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 Chromes), then
+2026-09-21 across all five (the full suite's own shape, 428 check runs, 10 Chromes):
+
+| | demo only | all five fixtures |
+|---|---|---|
+| check runs | 158 | **428** |
+| state keys in the fingerprint | 125, then 80 once it was sharpened | **80** |
+| the probe | **0.6 s over 158** (~4 ms each) | **1.1 – 5.1 s over 428** across three runs |
+| wall | **291 s** with it on, 296 s off | **372 – 451 s** over 10 Chromes, the probe ≤ 1.4 % of it |
+| leaking check runs, before | **24** (158/158 still passing) | **9 more**, none of them on the demo |
+| after | 0 | **428/428, 0 leaks** — 158 / 80 / 63 / 64 / 63 |
+| distinct state keys | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 | the same families, no new one |
+
+**The probe's cost is a range, not a number, and the spread is the honest figure**: 4.7 s, 5.1 s
+and 1.1 s over the same 428 checks on three consecutive full runs, against walls of 416 s, 451 s
+and 372 s. Two things push it up and neither is the fingerprint's size — the 10k fixture, where
+`vg.shown` and `vg.pinned` each walk every node (a 10,000-note vault pays about seven times the
+1,403-note one for those two keys), and a page that is *off* its baseline, since `rendered()` skips
+a hidden control and a check that left a panel open hands the next probe dozens more. The cheapest
+of the three runs is the one where nothing leaked, which fits that reading — **offered as the likely
+cause rather than a measured one**, since separating it would cost a run of its own. At worst 1.4 %
+of the wall, which is worth paying; a fingerprint that grew another per-node key would not be.
+
+**The other four fixtures found nine more leaks and no new kind.** Six checks, all in the families
+the demo had already named: the context-menu toggle persisting `folderShown` (on four fixtures), two
+checks ending on a camera their own filtering had moved, the golden check and the stand-in check
+each seeding the tag disc's hidden defaults, and a live-rebuild check whose legend is a different
+legend afterwards. The demo fixture came back **clean in all four of its jobs**.
+
+**Why the host store is scored at all, since within one job it cannot couple two checks.** The
+page reads `localStorage` at **mount**, so a key written by check N changes nothing for check N+1 —
+that page has already booted. It matters for the checks that re-mount: `goto()` in the pin check,
+and `reboot()` behind the phone teardown. That is not hypothetical, it is already in the source —
+`reboot()` deletes `bandOpen` by hand before reloading (github#170), which is this exact coupling
+found once, patched at the one site that bit, and left everywhere else. So the store stays in the
+boundary, and the checks that drive a control the page **persists** snapshot and restore it. The
+distinction that matters is the control, not the value: `__vg.setX()` passes the host callback
+`false` and writes nothing, while a real click on a settings toggle or a context-menu item writes.
+
+**The first thing the boundary caught on someone else's work, and the reason it is worth having.**
+github#101 made `__vg.checkFocusWeb()` return a `Promise`, on the reasoning that *"cdp.mjs already
+evaluates with `awaitPromise: true`, so a debug function returning a Promise needed no change on the
+calling side"*. That is true of `p.eval` and **false of `p.j`**, which wraps its argument as
+`JSON.stringify(<expr>)` — a string, returned immediately, so `awaitPromise` has nothing to wait
+for and the Promise object itself was serialised as `{}`. Every field read off it came back
+`undefined`, `r.geomGaps` was falsy, and the check took its *"no in-disc samples on this shape,
+nothing to measure"* branch and returned **`ok: true`**. Measured on this tree: the check asserted
+**nothing on all five fixtures** while reporting green, and the restore of `state.selected` — which
+github#101 moved inside the deferred sampling function — landed a frame after the check returned, so
+three of the five also left a note selected. **Nothing in the suite could see this except the state
+boundary**, because a check that measures nothing and passes looks exactly like a check that passes.
+Two fixes, both here: `p.j` now awaits (`JSON.stringify(await (<expr>))`, a no-op for the other 346
+call sites), and the check refuses a report that never arrived instead of reading it as a shape with
+nothing on it. **A check that cannot tell "nothing to measure" from "nothing came back" is a check
+that will pass through its own removal.**
+
+**And one more of the same family, caught only because the verification run happened on a machine
+at 100% RAM.** `fit frames the disc that is actually there` read its landed ratio through
+`camSettle()`, which returns once two polls 60 ms apart read the same numbers — and under frame
+starvation that means **no frame was drawn**, not that the camera has landed. It measured 0.9282
+against the 0.6134 its own fit promised, and the `camReset()` at the end was then overwritten by the
+flight still in the air, leaving `cam.ratio` at 0.6138 with the overview badge lit. It passed 6/6 in
+isolation, which is what a load-sensitive check looks like from the inside. Fixed by using
+`toRest()`, which waits on **`__vg.camAtRest`** — the page saying it has landed, rather than the
+harness inferring it from stillness. `camSettle()` is left alone: checks that deliberately park the
+camera off-rest need exactly its weaker guarantee.
+
+**A false positive of the instrument's own, and the fix for it.** A full run failed `legend count
+bars scale to the largest visible folder` on `cam.ratio 0.954 -> 0.9539` — a difference of one
+ten-thousandth, which is the fingerprint's own 4-dp rounding straddling a boundary, not a camera
+anybody moved. `diffState()` now gives a **fractional** value a tolerance of `1e-3`, which sits far
+under the tightest camera assertion in the suite (0.002). **Integers stay exact**, so a count never
+gets absorbed by it: `vg.shown 1403 -> 1402`, a row tally, a node id and a pin count all still
+differ. An instrument that cries leak over float noise costs the next reader the same hour it just
+cost this one.
+
+**Verified, finally, in the shape that counts.** Two consecutive `node scripts/smoke.mjs` runs
+with **no flags at all** — 428/428 across all five fixtures, 367 s and 364 s, and the suite
+**stamped the tree** both times, which it only does on a complete, unflagged, all-green run with
+every fixture present and no shape delta. Every earlier verification on this branch carried
+`--audit-state`, which `shapeDeltas()` classifies as *not the full suite*, and ran against a base
+ten commits stale. **That is how this branch claimed all-clear twice and was wrong twice**, and it
+is a lesson about the verification rather than about the boundary: a flag that changes how a run is
+classified changes what the run is evidence of. It also matters that the green runs happened on a
+machine at **54% memory** — the five before them ran at 99–100% with the wall drifting 396 s → 604 s,
+and at that end of the range the frame-reading Laws and cdp.mjs's fixed 10 s evaluate timeout start
+failing on their own.
+
+**One limitation the five-fixture run exposed, and it is the price of the rule rather than a
+defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
+undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
+and was invisible on the fifth, where `a narrow window with a pointer keeps the desktop's answer`
+had already taken that key off baseline under its own declaration. The alternative — scoring against
+the previous boundary — fails a check for putting an inherited key back and turns one unfixed leak
+into a failure in every check after it, which is worse. So a `leaves:` declaration is not free: it
+buys silence for that key for the rest of the job, and a key that several checks write wants each of
+them fixed rather than the first one declared.
+
+**What the instrument found, and what each one was.**
+
+- **`data-ov` did not exist until the overview first appeared.** `ovShow()` writes the attribute
+  only when the overview *changes*, so at rest on a fresh page the root carried no `data-ov` at all
+  — a CSS rule or a host reading `[data-ov="off"]` matched nothing before the disc was first
+  cropped and matched it afterwards. Four checks reported it as their leak; **the attribute was the
+  defect**. It is written at mount now, beside `data-sheet` and `data-band`, which were already.
+- **Three checks restored `state.hidden` by assigning the dict.** `__vg.state.hidden.folder = {}`
+  plus `syncAlpha()` never rebuilds the legend, so the row's `aria-pressed` went on claiming the
+  group was hidden while the page counted it as shown. That is exactly the defect github#113 found
+  in the context-menu check, in three more places; they restore by clicking the eye back, which is
+  the page's own path and moves the model, the legend and the layout together.
+- **Two checks left the camera where their interaction put it** — a hop flies to its note, and
+  clearing the pins re-fits a disc whose extent just changed. `only a hop lengthens the trail`
+  carried `attr.data-ov`, `open.vg-ov` and three camera keys into everything after it.
+- **Two left the settings store written.** Pressing a toggle twice restores the live state and
+  leaves the key behind, and that key **outlives a reload** — which is why `reboot()` already
+  deletes `bandOpen` by hand. `storeSnap`/`storeBack` put the blob back. The second is an asymmetry
+  worth its own look: the Tags button persists the dimension and `__vg.setDim()` does not, so
+  switching back through the API leaves `{"dim":"tag"}` stored.
+
+**Three mechanics the restores above rely on, written down here because the code now only points
+at them (github#188).** Each was found by a check that had one of them wrong.
+
+- **The legend is rebuilt on every eye click, so a restore has to re-query between clicks.** A
+  single `querySelectorAll` walked once clicks the first row and then clicks nodes the rebuild has
+  already detached, which silently does nothing.
+- **A row is given a `data-eye` only while its group is LIVE.** A group soloed down to zero visible
+  notes loses its own eye and can never be clicked back — `"(unlinked)"` is the one that bit. So a
+  "click every row that reads false" restore is wrong twice over: it cannot reach that group, and
+  it restores to *everything shown*, where `seedHidden()` hides some groups by default.
+  `walkSolo()` re-queries between clicks and falls back to `applyHiddenDefaults()` — the page's own
+  way back, `seedHidden()` + `buildLegend()` + a cascade — and both solo checks share the one
+  implementation rather than carrying a restore each.
+- **Clearing the emulated device metrics fires a resize that saves the settings from a frame of its
+  own, well after the call has returned.** A `storeBack()` issued from inside the check cannot win
+  that race, so `store.settings` is *declared* there rather than restored. Tuning a sleep to beat
+  it would be the flakiness this suite warns about; it is worth its own look instead.
+
+**Declared rather than fixed**, each with its reason at the check: the first check in a job to visit
+the tag disc seeds that disc's own hidden defaults and the page keeps them per dimension on purpose
+(design/0015, and `tags: each dimension keeps its own hidden and collapsed state` asserts it); the
+two legend-measuring checks expand every folder, which is what they measure; and the two
+live-rebuild checks change how many notes there are, which is the assertion.
+
+**No golden snapshot was regenerated and no threshold moved.** The four checks whose bodies changed
+did so to restore state they had been leaving, not to accommodate a reset.
+
+**What this does not do.** It does not diagnose the year-hover discrepancy (32 highlighted against
+30 notes, passing when rerun alone). github#146 named it a hypothesis about shared state and this
+does not upgrade it to a finding: the boundary makes that state deterministic from here, which
+removes the hypothesis's easiest hiding place without proving it was ever the cause. It also
+fingerprints one page per job, so it says nothing about coupling *between* jobs, which have none —
+each lane is its own Chrome and its own baseline. And a check that runs on several fixtures is
+audited separately in each, which is how four of the nine second-round leaks were found: the same
+check, clean on the fixture whose job happened to put a declared writer ahead of it.
+
+```bash
+node scripts/smoke.mjs --only "wheel notch" --audit-state /tmp/a.json   # what it changed, and read
+node scripts/smoke.mjs --no-state-boundary                             # score the leaks, do not fail them
+node scripts/smoke-runner-selftest.mjs                                 # the runner's own rules, no Chrome
+```
+
 ## A pin names its note, and the stored format says which format it is
 
 github#143, decisions/0014 (finding 9 of github#81). A graph id comes from input order --
@@ -5206,19 +6707,38 @@ drops -- so a live rebuild that deleted one pinned note silently cost every pin.
 check, which reads what the **host** ended up holding rather than what the page believes it stored:
 `["2"]` before, `["\u0000vault-graph:pins:2","C.md"]` after. Both writes go through `persistPins()`,
 and `savePinned` has exactly one call site so a third one cannot quietly appear.
-## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145)
+## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145, github#156)
 
-**`npm run lint` holds `src/page.js` and `plugin/main.js` at ZERO compiler diagnostics with
-`checkJs` on, and rejects a probe that assigns `42` to a `VaultData`-annotated binding.**
+**`npm run lint` holds `src/page.js`, `plugin/main.js` and `src/build-graph.mjs` at ZERO compiler
+diagnostics with `checkJs` on, and rejects a probe against each of the two programs.**
 
 ```bash
 node scripts/check-js-contracts.mjs      # or npm run lint, which calls it
 ```
 
-Two `tsc` runs against `tsconfig.contracts.json`, about 1.3s together. The first is the real
-check. The second is the reason this is a check and not a setting: it writes a copy of
-`src/page.js` with `var DATA = data` replaced by `/** @type {VaultData} */ var DATA = 42` and
-**fails if that copy comes back clean**.
+Four `tsc` runs, about 2.5s together: two real checks, and one probe each. The real checks are the
+browser program (`tsconfig.contracts.json` -- `src/page.js`, `plugin/main.js`) and the node program
+(`tsconfig.contracts-node.json` -- `src/build-graph.mjs`, github#156). The probes are the reason
+this is a check and not a setting: each writes a mutated copy of its program's entry point and
+**fails if that copy comes back clean** -- `src/page.js` with `var DATA = data` replaced by
+`/** @type {VaultData} */ var DATA = 42`, and `src/build-graph.mjs` with the `nodes,` in its
+`VaultData`-annotated `data` literal replaced by `nodes: 42,`.
+
+### Why there are two programs and not one widened one (github#156)
+
+`src/build-graph.mjs` is node code: without `"types": ["node"]` it reports **16 diagnostics that
+are all one cause** (`node:fs`/`node:path`/`node:url`, `process`, `Buffer`). The obvious move was
+to add those types to the shared program. **Measured 2026-09-21, that is a hole:** with node types
+on `tsconfig.contracts.json`, `if (process.env.X) { var B = Buffer.from("x"); }` inserted into
+`src/page.js` reported **zero** diagnostics. `src/page.js` is browser code and both of those are
+runtime failures there. Without node types the same insert is **two `TS2591`s**. So the browser
+program keeps `types: []` inherited, and the node-side entry point gets its own config.
+
+`src/page.js` is in **both** programs -- the exporter's annotations import its typedefs, which also
+pulls in `src/globals.d.ts` (without it, four `TS2339`s about `window.__vg`). So the gate reports
+the union of the two runs, **deduped by identity**, and the browser program is what still catches a
+node global in the page. The node program also reaches `src/sortspec-file.mjs` and
+`src/engine/notice.mjs`, which were in no program before; both are clean.
 
 **Why the second run exists.** Before github#145, `tsconfig.json` set `checkJs: false` -- it is
 typescript-eslint's program, and the compiler's own check ran over `src/engine/**/*.ts` alone.
@@ -5231,6 +6751,29 @@ probe runs every time.
 taken on `deca048` and do not match this code): the same program with `checkJs: true` and **no
 added strictness** reported **138 diagnostics -- 136 page, two plugin -- over 105 lines**. All
 138 are fixed at their source. The bar is zero.
+
+**What github#156 was worth, measured 2026-09-21.** `src/build-graph.mjs` was in no type program
+at all, so its annotations were comments nothing read -- and it had **none**: the file carried zero
+type annotations, so a naive include reported zero for the dullest possible reason. Annotating the
+producer boundary against `VaultNode` / `VaultEdge` / `VaultStats` / `VaultData` found **four**
+things nothing was checking, all fixed at their source:
+
+| | What was unchecked | Now |
+|---|---|---|
+| `sortSpecs` | `SORT_SPECS`'s accumulator is an evolving `[]`, so it reached `VaultData.sortSpecs` as `any[]`. Dropping `origin` from a pushed spec: not caught. `origin: 7`: not caught | `@type` on the accumulator, from `VaultData` itself; both are `TS2345`/`TS2322` |
+| `folderOrder` | The exporter spreads it onto `data` and `src/shell.html` reads it back off `VAULT_DATA` as a `MountDeps` -- and `VaultData` declared it nowhere, so **neither end of that round trip** was checked | declared on `VaultData`, and `FOLDER_ORDER` typed as the page's own union |
+| the `--folder-order` guard | `.includes(v)` over the three valid values returns a boolean and narrows nothing, so a vetted value left the IIFE as plain `string` -- the guard read as more than it typed | an `===` chain that narrows; relaxing it to `if (v) return v` is now `TS2322` |
+| `src/dates.mjs` | unannotated, and it is the direct producer of `VaultNode.created`, `VaultNode.touched` and `VaultStats.dates` -- so those three arrived as `any` and the boundary annotation would have checked nothing about them | a `DateSource` union and `@param`/`@returns` on all seven exports |
+
+**And github#152's own defect is a compile error now**, which was the ticket's argument for doing
+this: dropping `dirs` or `touched` from the exporter's ghost literal is `TS2322` at the keystroke,
+where it was previously found by a person reading prose for an unrelated documentation ticket.
+
+**No behaviour changed, and that was measured too.** The same 400-note fixture built before and
+after, three ways (plain, `--folder-order explorer`, and `--folder-order nonsense` to exercise the
+rejection path the narrowing guard replaced): `window.VAULT_DATA` **byte-identical** in all three,
+and the only difference anywhere in the emitted page is the four comment lines added to
+`src/page.js`'s `VaultData` typedef, which the exporter inlines verbatim.
 
 **Zero, not a baseline.** github#145 allows a baseline *if the work is phased*, tracked **by
 identity and never by total** -- a count lets one new error silently replace one old one. It was
@@ -5259,6 +6802,11 @@ Tried against the finished check, each one made it fail:
 | `checkJs` back to `false` in `tsconfig.contracts.json` | the probe is no longer rejected |
 | `plugin/main.js` dropped from the `include` | `--listFiles` says it is not in the program |
 | the probe's anchor renamed away in `src/page.js` | a hard failure, never a skip -- a probe testing nothing is the failure this prevents |
+| `checkJs` back to `false` in `tsconfig.contracts-node.json` (github#156) | the exporter probe is no longer rejected |
+| `src/build-graph.mjs` dropped from that `include` (github#156) | `--listFiles` says it is not in the program |
+| the exporter probe's anchor renamed away (github#156) | a hard failure, never a skip |
+| the `@type {VaultData}` deleted from the exporter's `data` (github#156) | the exporter probe is no longer rejected |
+| node types added to `tsconfig.contracts.json` (github#156) | nothing does, which is why they are not there -- the browser program is what catches `process` in `src/page.js`, and it can only do that while its `types` stays `[]` |
 
 The fourth, dropping `src/page.js` from the `include`, does **not** fail, and correctly: it
 stays in the program as `plugin/main.js`'s import and stays checked. That was measured too, by
@@ -5268,8 +6816,17 @@ reintroducing a real defect with the file out of the include and watching 22 dia
 ### Not covered
 
 `strictNullChecks` over the JavaScript -- github#145 calls it a separate, later, measured step,
-and github#55's ratchet owns it. `src/build-graph.mjs` and `scripts/**` are in no type program
-today; widening the program is its own measurement.
+github#55's ratchet owns it, and github#156 did not touch it.
+
+`scripts/**` is in no type program. github#156 deliberately stopped at `src/build-graph.mjs`: it is
+the one that produces data the page's declared types describe, so it is where a disagreement is
+most expensive and most checkable, and much of `scripts/**` is harnesses whose annotations matter
+less than a producer's. Widening to it is its own measurement.
+
+**Annotating the rest of `src/build-graph.mjs`** beyond the producer boundary, likewise. github#156
+annotated what crosses into `VaultData` and the accumulators feeding it; the file's internal helpers
+are still unannotated, which means they are `any` and check nothing. That is not a hole in this
+invariant -- the boundary is what the page depends on -- but it is not coverage either.
 
 ## The disc's right-click is the host's until a reader asks for it (github#165)
 
@@ -5615,7 +7172,7 @@ again. Its twin, "a narrow window with a pointer keeps the desktop's answer", ho
 half of the predicate at 390x844 with a fine pointer **and asserts the calendar is still open
 there, from the store** -- the fold keys off `phone()`, never off `narrow()`. Both put touch emulation and the
 metrics override back on every exit. `scripts/mobile-check.mjs` reports the same readings at any
-device and takes the `screen-left` lock.
+device and claims its screen through the harness hook when one is configured.
 
 **The scrollbar costs the disc 15px in a desktop-Chrome harness and nothing on a phone** --
 `overflow-y: auto` reserves a classic scrollbar there, so the square measures 375 and the radius
@@ -5694,7 +7251,7 @@ and without the push, and requires the two rides to agree on the flip count and 
 goes off within two sample periods; it also asserts the disc flies home exactly once, which is the
 half that fails on `develop`. Its wait is bounded at both ends (github#179) — a sampler tick that
 throws stops the ride and reports its message, and `rideCap()` fails it at **5 s** if the page
-stops ticking at all — so a future hang here fails with a reason instead of holding `screen-left`
+stops ticking at all — so a future hang here fails with a reason instead of holding its screen
 until the transport gives up with only the expression to show for it. "A rotation to landscape writes the host nothing" counts `onBandOpen`
 by wrapping the shell's `saveSettings` across the flip, and keeps github#173's own assertions on
 that rotation, so the zero cannot be bought by dropping the restore. "`narrow()` costs no
@@ -5779,3 +7336,85 @@ scroll the page.
 **Desktop unchanged, measured both ways:** all five goldens match, positions and band; and every
 box and reading at 1600x1000 is identical to `fd08e12` -- 64 of them, including the camera and both
 pan flags.
+
+## check-pii names nobody in its own source (`github#196`)
+
+The tracked `scripts/check-pii.mjs` holds only generic shapes: an email address outside the
+reserved and noreply domains, an `*.atlassian.net` host, a Windows user path, and the generic
+drive-root `Obsidian` vault path. Every rule that would name somebody is loaded from the same
+place as the names, never from a commit: the untracked `.pii-names`, or the `PII_NAMES` secret
+in CI (`quality.yml` and `release.yml` both pass it to the step). A bare entry is a name.
+`email: <domain>`, `jira: <KEY>` and `vault: <name>` are typed entries, and each adds a work
+email, Jira key or vault path rule. Any other `kind:` prefix exits 1. `.pii-names.example`
+documents the format with placeholder values.
+
+**A list that is loaded but lacks a kind fails in CI and warns locally.** `PII_NAMES` without an
+`email:`, `jira:` or `vault:` entry exits 1, so a secret that was never updated cannot run half
+the rules and pass. A local `.pii-names` without one prints a warning naming the missing kind and
+exits 0. With no list at all nothing has changed: the generic patterns run and the `NO NAME LIST`
+warning prints.
+
+**Negative controls run on every invocation.** Each generic pattern gets one. Each loaded name,
+domain, key and vault gets a synthetic line, and that line has to be flagged **by the rule it was
+built for**. The clean line prints the count (`12 names, rules 1 email, 2 jira, 1 vault, 7 patterns,
+20 negative controls caught` on the maintainer's list). A control that does not bite exits 1. The
+message names only its kind and index (`jira #1`) and never the value, because the CI log of a
+public repository is public too.
+
+## A stopped run takes its browsers and temp dirs with it (`github#197`)
+
+`smoke.mjs` names every temp dir it makes after its own pid (`vg-smoke-p<pid>-`,
+`vg-smoke-build-p<pid>-`, via `runDir` in `scripts/interrupt.mjs`). It removes a lane's profile only
+after that lane's browser process has exited, because the CDP port closes first and Chrome is still
+holding the files. It removes its builds when the run ends. A signal (INT, TERM, HUP, BREAK), or the
+stop file named by `VG_STOP_FILE`, runs the same teardown within a 4 s budget and exits: each lane's
+`killBrowser`, then its profile, then the builds and the screen. A job that has not started its
+browser yet refuses to start one.
+
+**A run starts by reaping what a finished run left.** `reapStale` removes any `vg-smoke-*` dir whose
+owning pid is no longer running, and first kills any browser still using it as its profile. It
+removes an untagged dir only once it is a day old. It never touches a dir whose owner is alive, in
+this worktree or another, until the dir is a day old too: no run lasts a day, so by then the pid has
+been reused. It works within a time budget (1 s at the start of a run), dead-owner
+dirs first, so an old backlog clears over several runs instead of stalling one.
+
+**The pre-push hook stops the suite through the stop file, never with a bare `kill`.** Under Git
+Bash a `kill` never reaches the native `node`: the suite ran on after the hook had released its
+lock. The trap writes the stop file and waits up to 5 s. Only if the suite is still there does it
+take the tree down by its Windows pid (or `kill -9` elsewhere). It then reaps and releases the lock.
+
+**The other harnesses that hold a lock or write into a vault register their cleanup with
+`onInterrupt`:** `spike-check`, `host-phone-check`, `mobile-check`, `probe-room`, `suite-repeat`,
+`refresh-check` (its probe note) and `deferred-check`. Without a listener, node exits on the spot
+and skips both `finally` and `exit` handlers.
+
+`smoke-runner-selftest.mjs` holds the rule with no Chrome:
+- a reap removes a gone run's profile and build;
+- it keeps a live run's, both its own and its parent's;
+- it removes an untagged dir, or a live pid's, only once it is a day old;
+- it leaves anything without the prefix;
+- a stop file runs a registered teardown and exits with its code.
+
+## Parent tags only leaves no sub-wedge and keeps the rings (github#203)
+
+**`Parent tags only` is a chip in the legend header, shown in the tag view only, off by default.**
+On, `fileSub()` answers no sub and `fileDirs()` no deeper dirs in the tag dimension, so no
+parent tag has a sub-wedge, a sub-tint or a pushed sub-wedge. The folder view never reads the flag.
+
+**Subtag filters retain their original paths.** `noteDirs()` keeps the full filing for visibility,
+while `fileDirs()` flattens only the display. The check `parent tags only preserves subtag filters
+through the cascade` hides `area/health` and `area/health/sleep` on the tag fixture and clicks the
+chip on and off. The same notes must remain visible at both endpoints, and no excluded note may
+appear during either animation.
+
+**The rings are the ones it was switched into.** The toggle re-packs inside the locked rings, as a
+dimension switch does: the cascade ends on the resting layout with no jump, and `geomLock`
+(`r0`, `rOuter`, `maxR`) is the same before, on and after off.
+
+**Off is today's tag view**: the same groups in the same order, the same sub-wedges, the same
+rings. The goldens do not move, because the setting starts off.
+
+The check `parent tags only leaves no sub-wedge, keeps the rings, and off is today's tag view`
+reads it on every fixture: sub-wedges, the group order, the rings and plan parity, with the
+setter and with the chip's own click through the cascade. A vault with no nested tags answers
+`NOT ASSERTED`. It leaves `state.hidden`, `vg.geomLock` and `store.settings` off baseline by design.

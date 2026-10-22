@@ -1,0 +1,51 @@
+{
+  // THE COMPILER'S CHECK ON THE NODE-SIDE JavaScript (github#156). The exporter,
+  // src/build-graph.mjs, and the three modules only it imports. Same gate as
+  // tsconfig.contracts.json's: scripts/check-js-contracts.mjs runs both, scripts/lint.mjs calls
+  // that, and the pre-push hook and release.ps1 inherit it through `npm run lint`.
+  //
+  // A FOURTH CONFIG, AND THE ONE NUMBER THAT DECIDED IT. The obvious move was to add
+  // src/build-graph.mjs to tsconfig.contracts.json's include and `"types": ["node"]` beside its
+  // checkJs -- one program, one run. Measured 2026-09-21, that is a hole: with node types on the
+  // shared program, `if (process.env.X) { var B = Buffer.from("x"); }` inserted into src/page.js
+  // reported ZERO diagnostics. src/page.js is browser code and both of those are runtime
+  // failures there, so node types on the page's own program silently deletes the check that
+  // catches them. Without them the same insert is two TS2591s. The browser program therefore
+  // keeps `types: []`, inherited, and the node-side files get their own program.
+  //
+  // WHAT IT WAS WORTH, MEASURED. Before github#156 src/build-graph.mjs was in no type program at
+  // all -- neither this family's nor tsconfig.json's -- so every annotation in it was a comment
+  // nothing read, which is exactly what github#145 found the page's to be. It had none to read:
+  // the file carried zero type annotations, so a naive include reported zero for the dullest
+  // possible reason. github#156 annotated the producer boundary against src/page.js's VaultNode /
+  // VaultEdge / VaultStats / VaultData and found four things nothing was checking: sortSpecs
+  // reaching VaultData as `any[]`, `folderOrder` emitted by the exporter and read by shell.html
+  // while declared on neither side, a `--folder-order` guard that vetted without narrowing, and
+  // src/dates.mjs -- the producer of created, touched and stats.dates -- unannotated, so those
+  // three arrived as `any`. All four are fixed at their source. The bar is zero.
+  //
+  // src/globals.d.ts IS IN THE INCLUDE, and it is not decoration. The exporter's annotations say
+  // `import("./page.js").VaultNode`, which pulls src/page.js into this program, and page.js reads
+  // window.__vg -- without globals.d.ts that is four TS2339s about a file this program is not
+  // here to check. Two consequences worth stating: page.js is checked twice, so
+  // check-js-contracts.mjs reports diagnostics by identity and dedupes across the two runs; and
+  // page.js is read HERE with node types available, which is why the measurement above matters
+  // and why the browser program still has to exist. The union of the two runs is the gate.
+  //
+  // strict IS OFF, inherited, for the reason tsconfig.json states. strictNullChecks over the
+  // JavaScript is github#55's ratchet and github#156 is not it.
+  //
+  // include IS NOT tsconfig.json's, deliberately -- the one place this family breaks that rule.
+  // That program is typescript-eslint's and esbuild reads it by name; naming a node-side entry
+  // point there would put these files in front of the browser lint rules and the bundler for no
+  // gain. src/dates.mjs, src/links.mjs, src/sortspec-file.mjs and src/engine/notice.mjs are in
+  // this program as the exporter's imports rather than by name, which is how tsc found them and
+  // is enough: an import that moves takes the file out of the exporter's reach too, so there is
+  // no silent drop of the kind tsconfig.json's comment guards against.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "types": ["node"]
+  },
+  "include": ["src/build-graph.mjs", "src/globals.d.ts"]
+}

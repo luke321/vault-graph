@@ -9,27 +9,12 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
   "<substring>"` is the iteration loop.
-- **Two things may not run twice at once**, and they are different resources. A **screen** —
-  `record-demo.ps1` grabs a region of the desktop, and spike tests and the suite also take over
-  displays — so the lock is named after the monitor, not the job. And the **shared fixture store**,
-  which a regenerating suite run deletes out from under a concurrent one. One machine-wide mutex,
-  shared by every worktree:
-
-  ```powershell
-  node scripts/lock.mjs acquire screen-right --owner "<who you are>"  # exit 1 = give up
-  node scripts/lock.mjs release screen-right --owner "<who you are>"  # always, even on failure
-  node scripts/lock.mjs status
-  ```
-
-  Names: `screen-left`, `screen-right`, `screen-primary` for the displays, `suite` for
-  `.fixtures/` — separate claims, deliberately not aliased, so `pre-push` can hold `suite` while
-  the `smoke.mjs` it spawns holds `screen-left`. All three window-placing harnesses take their
-  own screen lock now (`smoke.mjs`, `spike-check.mjs`, `record-demo.ps1`), so you only do this by
-  hand for something else that seizes a display — never wrap one of the three, or its own
-  acquire waits out your hold. The root is shared with a sister Obsidian plugin, so if you work on
-  both, their jobs contend. `make-hero.ps1` needs no lock — it transcodes a file. Screenshots need none —
-  `shoot.mjs` goes over CDP — but pass your own `--port`. Never wrap a `git push` in an outer
-  acquire/release of either name, or the hook's own attempt blocks on yours and the push hangs.
+- **The harnesses take no lock of their own.** When several runs share one machine, an optional
+  harness hook configured outside the repo (`VAULT_GRAPH_HARNESS_HOOK`, or
+  `git config vaultgraph.harnessHook`) holds a screen or the fixture store for them and names the
+  monitor a window goes on; `node scripts/harness-hook.mjs status` says who holds what. With none
+  configured, nothing is held and nothing waits. The contract is `.ai-context/harness-hook.md`.
+  Screenshots over CDP (`shoot.mjs`) need nothing, but pass your own `--port`.
 - **A vault Obsidian has not been told to trust opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over

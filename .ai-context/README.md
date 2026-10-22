@@ -11,11 +11,12 @@ changing the layout or the animation.
 | `changelog-detail.md` | The measurement behind every change, dated, with the numbers on both sides of it. **This file is the regression suite** — a change to how the disc looks or moves adds a row here |
 | `perf-cascade-frame-cost.md` | What an animated frame costs on a 10k vault, term by term; what was taken out of it and what is left (github#19). Read before optimising the cascade, and before believing anything about `renderer.refresh`'s options |
 | `releasing.md` | How a release is cut: enumerating the range, what must be finished on `release/<version>` before anything merges down, and why a tag is never edited after the fact |
-| `locking.md` | Why `scripts/lock.mjs`'s two lock names (`screen-*`, `suite`) stay separate rather than aliased, the deadlock that proved it, and the github issues behind each (github#87, github#92) |
+| `harness-hook.md` | The optional hook the harnesses call to hold a screen or the fixture store and to be told which monitor to use; with none configured they take no lock at all (github#192) |
 | `obsidian-trust-mode.md` | Why a vault Obsidian hasn't trusted opens in restricted mode and reads as a broken plugin, and the CDP workaround every harness uses |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
 | `mobile-harness.md` | `scripts/mobile-check.mjs`: the page at a phone's viewport with real touch, why the run needs a desktop control column, and the four ways the harness measured the wrong thing first (github#73) |
+| `usability-thresholds.md` | `scripts/usability-audit.mjs`: published target-size, acuity, legibility, contrast, colour-vision and gesture thresholds with their sources, the device profiles that turn CSS px into visual angle, and what the page fails today (github#200) |
 | `live-growth-harness.md` | `scripts/live-growth-check.mjs`: the live rebuild driven against a vault that is actually growing under it (github#72) |
 | `awaiting-a-page-promise.md` | Why a check that samples over time must use `p.eval` and not `p.j`, what the transport's 10s ceiling does and does not bound, and the two bounds a ride carries instead (github#179) |
 | `finding-notes-touch-mid-cascade.md` | The long-form investigation behind the mid-cascade dot-size finding — kept because the method is the point, not just the answer |
@@ -50,6 +51,7 @@ numbers stay and the index spells them out.
 | `0013-a-tree-is-gated-once` | A green full suite run stamps the git tree it measured; the hook and `release.ps1` skip a stamped tree, and why not by commit, by time or by `SKIP_SMOKE` (github#93) |
 | `0014-a-pin-names-its-note-not-its-position` | Why a pin is stored by the note's path: an id is a position, and a position only holds while the input order does (github#143) |
 | `0015-mirror-the-explorer-not-its-api` | Why the file-explorer order is parsed from the sortspec text, which subset, and why it falls back loudly (github#71) |
+| `0016-the-suite-runs-headless-but-nothing-requires-it` | Why headless is a flag and never sniffed, why the lane seam is github#113's `clock`, why the screen lock is skipped rather than excepted, and why the soak measures the spread before anything becomes a required status (github#155) |
 
 ### DDRs — `design/`
 
@@ -75,6 +77,7 @@ numbers stay and the index spells them out.
 | `0018-gallery-new-in` | The generated "New in <version>" line above the gallery's nav table: which features count as new, and why the strip is built rather than written (github#127) |
 | `0018-not-stealing-the-keyboard` | Why a harness run used to take the keyboard, why the screen lock never addressed it, and the three things counting activations changed about the fix (github#129) |
 | `0019-two-readings` | The sidebar's two readings, Groups and the selected note: what the floating card covered, the four prototypes measured against it, why tabs won, and why the panel is a plain wrapper (github#80, github#131) |
+| `0020-the-producer-contract` | The shape both producers owe the page, and the policy they share: what the line-for-line port had already cost, why the contract is declared *and* documented, why the plugin's adapter moved to its own file, and why a declared divergence has to still happen (github#149) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

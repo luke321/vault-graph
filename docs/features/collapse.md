@@ -42,11 +42,9 @@ size, and the folder list second, because the disc visibly re-centres when the c
 ## Regenerating this feature's clip
 
 ```powershell
-node scripts/lock.mjs acquire record --owner "#82 collapse"
 .\scripts\record-demo.ps1 -Act collapse -Monitor right
 # wrote demo-collapse-<timestamp>.mp4
 .\scripts\make-hero.ps1 -In demo-collapse-<timestamp>.mp4 -Out assets\features\collapse.webp
-node scripts/lock.mjs release record --owner "#82 collapse"
 ```
 
 Commit `assets/features/collapse.webp` and update `Last re-recorded` below in the same commit —
@@ -74,4 +72,4 @@ node scripts/mobile-check.mjs --device iphone14  # the sheet below the breakpoin
 | | |
 |---|---|
 | **Introduced in** | `2.2.0 (github#82)` |
-| **Last re-recorded** | `2.9.0 — 2026-09-19` — 6.7 s at 1000x1000, encoded at 1000 px (0.56 MB) |
+| **Last re-recorded** | `2.10.0 — 2026-10-21` — 6.8 s at 1000x1000, encoded at 1000 px (0.77 MB) |

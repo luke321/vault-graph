@@ -8,7 +8,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { admit, claimScreen, noFreeScreen, release, threads } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -40,38 +42,18 @@ const RANK = Number(arg("rank", 1));
 const HOLD = Number(arg("hold", 0));
 const FILM = arg("film", "");
 const FPS = Number(arg("fps", 30));
-const NO_LOCK = argv.includes("--no-lock");
 
-// github#87
-const SCREEN_LOCK = "screen-left";
+// github#87, github#192
 const SCREEN_OWNER = "probe-room.mjs " + branchName() + " [" + process.pid + "]";
 
-// github#87
 function takeScreen() {
-  if (NO_LOCK) return false;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("");
-    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
-    console.error("display, and this harness parks a Chrome window on it.");
-    console.error("Who holds it:  node scripts/lock.mjs status");
-    console.error("Pass --no-lock ONLY when the caller already holds it.");
-    process.exit(1);
-  }
-  return true;
+  const s = claimScreen(SCREEN_OWNER);
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
+  return s.lock;
 }
 
-// github#87
-function dropScreen(held) {
-  if (!held) return;
-  try {
-    spawnSync(process.execPath,
-      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-      { stdio: "ignore" });
-  } catch { /* github#87 */ }
-}
+/** @param {string | null} held */
+function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 function findChrome() {
   const named = arg("chrome", "");
@@ -114,7 +96,7 @@ function findFfmpeg() {
 }
 
 /* github#80, design/0019 */
-function encodeFilm() {
+async function encodeFilm() {
   if (!frames.length) throw new Error("no screencast frames arrived; nothing to encode");
   const lines = [];
   for (let i = 0; i < frames.length; i++) {
@@ -127,12 +109,15 @@ function encodeFilm() {
   writeFileSync(list, lines.join("\n") + "\n");
 
   const span = frames[frames.length - 1].t - frames[0].t;
+  // github#198
+  await admit("encode", SCREEN_OWNER);
+  const n = await threads("encode", SCREEN_OWNER);
   const r = spawnSync(findFfmpeg(), [
     "-hide_banner", "-loglevel", "warning",
     "-f", "concat", "-safe", "0", "-i", list,
     "-vf", `fps=${FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-    "-movflags", "+faststart", "-y", resolve(FILM),
+    "-movflags", "+faststart", ...(n ? ["-threads", String(n)] : []), "-y", resolve(FILM),
   ], { stdio: "inherit" });
   if (r.status !== 0) throw new Error("ffmpeg exited " + r.status);
   console.log(`\nfilmed ${frames.length} frames over ${span.toFixed(1)}s -> ${resolve(FILM)}`);
@@ -288,6 +273,8 @@ const SELECT = `(function () {
 /* ------------------------------------------------------------------------------- the run */
 
 const profile = mkdtempSync(join(tmpdir(), "vg-room-profile-"));
+// github#198
+if (FILM) await admit("record", SCREEN_OWNER);
 const held = takeScreen();
 
 const rows = [];
@@ -296,6 +283,11 @@ const frames = [];
 let filmDir = "";
 let page = null;
 let chrome = null;
+// github#197
+onInterrupt(() => {
+  try { if (chrome) chrome.kill(); } catch { /* github#80 */ }
+  dropScreen(held);
+});
 try {
   // github#129, github#135
   const focus = await keepFocus();
@@ -435,7 +427,7 @@ try {
   if (FILM) {
     await page.send("Page.stopScreencast").catch(() => { /* github#80 */ });
     await sleep(400);
-    encodeFilm();
+    await encodeFilm();
   }
 
   if (OUT_JSON) {

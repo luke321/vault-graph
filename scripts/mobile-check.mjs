@@ -8,8 +8,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
-import { leftmostScreen } from "./screen.mjs";
+import { harnessScreen } from "./screen.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -54,31 +56,24 @@ const freePort = () => new Promise((res, rej) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// github#170 -- see .ai-context/locking.md
-const LOCK = "screen-left";
+// github#170, github#192
 const LOCK_OWNER = "mobile-check [" + process.pid + "]";
-let holdsLock = false;
+/** @type {string | null} */
+let heldScreen = null;
 function takeLock() {
-  if (flag("no-lock")) return;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", LOCK_OWNER],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
-    console.error("  who: node scripts/lock.mjs status");
-    process.exit(1);
-  }
-  holdsLock = true;
+  const s = claimScreen(LOCK_OWNER);
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
+  heldScreen = s.lock;
 }
 function dropLock() {
-  if (!holdsLock || flag("keep")) return;
-  holdsLock = false;
-  spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "release", LOCK, "--owner", LOCK_OWNER],
-    { stdio: "ignore" });
+  if (flag("keep")) return;
+  release(heldScreen, LOCK_OWNER);
+  heldScreen = null;
 }
 // github#170 -- a throw before Chrome spawns must still free the lock
 process.on("exit", dropLock);
+// github#197
+onInterrupt(() => {});
 
 function fixtureStore() {
   const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
@@ -139,7 +134,7 @@ async function main() {
 
   const PORT = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "vg-mobile-profile-"));
-  const scr = leftmostScreen();
+  const scr = harnessScreen();
   // github#129
   const focus = await keepFocus();
   const chrome = spawn(findChrome(), [

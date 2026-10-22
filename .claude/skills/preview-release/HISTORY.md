@@ -1,5 +1,15 @@
 # preview-release — change log
 
+## 2026-10-16 - the previous tag is a version tag
+
+Cutting 2.10.0, `git tag --sort=-creatordate | head -1` answered `keep/203`, a preservation ref
+made after a merge, instead of `2.9.0`. Non-version tags sort in by creation date too. The recipe
+now lists only tags that start with a digit (`--list "[0-9]*"`); every release tag since 1.5.0
+is bare semver.
+## 2026-09-29 - no longer names a session role (github#194)
+
+"Safe to run from any session" became "from any checkout"; "his pick" became "the maintainer's pick".
+
 ## 2026-09-11 — read the last published release before drafting
 
 Added step 2, "Read the last published release before drafting anything", and renumbered the

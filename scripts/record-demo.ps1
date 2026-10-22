@@ -87,6 +87,36 @@ if (Test-Path $profileDir) {
 
 $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe').'(default)'
 
+# github#87, github#192 -- a configured harness hook holds the screen, or names a free one; with
+# none, nothing is held and the placement is the default below
+$hook = Join-Path $here 'harness-hook.mjs'
+$lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
+# github#198
+$null = & node $hook admit record --owner $lockOwner --pid $PID
+$threads = "$(@(& node $hook threads encode --owner $lockOwner) | Select-Object -Last 1)".Trim()
+$screenLock = $null
+$region = $null
+if ($Monitor) {
+  & node $hook acquire "screen-$Monitor" --owner $lockOwner
+  if ($LASTEXITCODE -ne 0) {
+    throw "screen-$Monitor is BUSY -- another session is using that display. Nothing was recorded."
+  }
+  $screenLock = "screen-$Monitor"
+} elseif ($X -eq [int]::MinValue) {
+  $named = "$(@(& node $hook screen --owner $lockOwner) | Select-Object -Last 1)".Trim()
+  if ($LASTEXITCODE -ne 0) {
+    throw "every screen is BUSY -- other sessions are using them. Nothing was recorded."
+  }
+  if ($named -match '^(\w+)(?:\s+(-?\d+),(-?\d+),(\d+),(\d+))?$') {
+    $Monitor = $Matches[1]; $screenLock = "screen-$Monitor"
+    if ($Matches[2] -and [int]$Matches[4] -gt 0 -and [int]$Matches[5] -gt 0) {
+      $region = New-Object System.Drawing.Rectangle ([int]$Matches[2]), ([int]$Matches[3]), ([int]$Matches[4]), ([int]$Matches[5])
+    }
+  }
+}
+
+try {
+
 $posX = 40; $posY = 40
 if ($Monitor) {
   $screens = @([System.Windows.Forms.Screen]::AllScreens)
@@ -96,7 +126,7 @@ if ($Monitor) {
     'right'   { $screens | Sort-Object { $_.Bounds.X } | Select-Object -Last 1 }
   }
   if (-not $target) { throw "no monitor matched -Monitor $Monitor" }
-  $wa = $target.WorkingArea
+  $wa = if ($region) { $region } else { $target.WorkingArea }
   $posX = $wa.X + [int](($wa.Width  - $Width)  / 2)
   $posY = $wa.Y + [int](($wa.Height - $Height) / 2)
   Write-Host ("monitor {0} ({1}) -> window at {2},{3}" -f `
@@ -105,21 +135,6 @@ if ($Monitor) {
     Write-Warning "that screen is left of the primary, so gdigrab sees negative offsets -- check the capture"
   }
 }
-# github#87
-$screenLock = $null
-if ($Monitor) { $screenLock = "screen-$Monitor" }
-elseif ($X -eq [int]::MinValue) { $screenLock = "screen-primary" }
-if ($screenLock) {
-  $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
-  Write-Host "taking $screenLock (owner: $lockOwner)..." -ForegroundColor DarkGray
-  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner
-  if ($LASTEXITCODE -ne 0) {
-    throw "$screenLock is BUSY -- another session is using that display. Nothing was recorded."
-  }
-}
-
-try {
-
 if ($X -ne [int]::MinValue) { $posX = $X }
 if ($Y -ne [int]::MinValue) { $posY = $Y }
 
@@ -259,7 +274,8 @@ $ffArgs = @(
   '-offset_x', "$rx", '-offset_y', "$ry", '-video_size', "${rw}x${rh}",
   '-i', 'desktop',
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-  '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+  '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
+) + @(if ($threads) { '-threads'; $threads }) + @(
   '-y', $Out
 )
 $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -318,6 +334,6 @@ finally {
   }
   # github#87
   if ($screenLock) {
-    & node (Join-Path $here 'lock.mjs') release $screenLock --owner $lockOwner
+    & node $hook release $screenLock --owner $lockOwner
   }
 }

@@ -28,7 +28,7 @@ Set-Location $repo
 # act -> published asset basename. `live`'s clip is live-page; every other one matches its act.
 $acts = [ordered]@{
   intro = 'intro'; folders = 'folders'; subfolders = 'subfolders'; subfoldercolor = 'subfoldercolor'
-  colours = 'colours'; sort = 'sort'; tags = 'tags'; unlinked = 'unlinked'; hiddenbydefault = 'hiddenbydefault'
+  colours = 'colours'; sort = 'sort'; tags = 'tags'; parenttags = 'parenttags'; unlinked = 'unlinked'; hiddenbydefault = 'hiddenbydefault'
   collapse = 'collapse'; compactaxis = 'compactaxis'; timeline = 'timeline'; heatmap = 'heatmap'; recent = 'recent'
   note = 'note'; pin = 'pin'; hoptrail = 'hoptrail'; camera = 'camera'; live = 'live-page'
 }

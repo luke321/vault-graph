@@ -58,6 +58,7 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
  * @property {{ folder: string, text: string, origin: string }[]} [sortSpecs]  github#71
+ * @property {"name" | "explorer" | "size"} [folderOrder]  github#156 -- the standalone alone sets it, from --folder-order; shell.html reads it back off VAULT_DATA as a MountDeps
  */
 
 // github#72, design/0014
@@ -131,6 +132,8 @@
  * @property {boolean} [countBars]              github#78, design/0006
  * @property {boolean} [rootInOrder]            github#164 -- off is today's order
  * @property {(v: boolean) => void} [onRootInOrder]  github#164
+ * @property {boolean} [parentTagsOnly]         github#203 -- off is today's tag view
+ * @property {(v: boolean) => void} [onParentTagsOnly]  github#203
  * @property {boolean} [devTools]               github#165 -- absent means "follow DATA.dev"
  * @property {(v: boolean) => void} [onDevTools]     github#165
  * @property {"folder" | "tag"} [dim]         github#86, design/0015 -- absent means "folder"
@@ -219,6 +222,7 @@
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
  * @property {(v: boolean) => void} setCountBars
  * @property {(v: boolean) => void} setRootInOrder                github#164
+ * @property {(v: boolean) => void} setParentTagsOnly             github#203
  * @property {(v: boolean) => void} setDevTools                   github#165
  * @property {(v: boolean) => boolean} setWedgeGrid               github#165
  * @property {(v: number) => number} setTimeScale                 github#165
@@ -237,7 +241,7 @@
  * @property {(kind: string | null, refMs?: number) => void} setRecent
  * @property {(src: string) => void} setHeatSource
  * @property {() => PlanParityReport} checkPlanParity
- * @property {() => unknown} checkFocusWeb
+ * @property {() => Promise<unknown>} checkFocusWeb
  * @property {() => unknown} debugDump
  */
 
@@ -736,6 +740,9 @@ function mountVaultGraph(root, data, deps) {
   // github#164 -- OFF is today's disc, so nothing moves until a reader asks
   var rootInOrder = deps.rootInOrder === true;
   var onRootInOrder = typeof deps.onRootInOrder === "function" ? deps.onRootInOrder : null;
+  // github#203 -- OFF is today's tag view
+  var parentTagsOnly = deps.parentTagsOnly === true;
+  var onParentTagsOnly = typeof deps.onParentTagsOnly === "function" ? deps.onParentTagsOnly : null;
   // github#164 -- the name the root group SORTS as: its first note
   var rootKey = "";
   var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
@@ -941,9 +948,102 @@ function mountVaultGraph(root, data, deps) {
 
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
 
-  // github#58
+  // github#186, decisions/0017
+  var DOT_CLEAR = 0.92;
+  // github#186 -- a note's links to notes on screen, over all its links
   /** @type {Record<string, number>} */
-  var hubRank = dict();
+  var visSrc = dict();
+  /** @type {Record<string, number>} */
+  var visDst = dict();
+  var visEase = 1;
+  var countFloorFrom = 0, countFloorTo = 0;
+  // github#186
+  /** @type {Record<string, Record<string, number>>} */
+  var basisDegrees = dict();
+  /** @type {Record<string, Record<string, number>>} */
+  var basisRanks = dict();
+  /** @type {Record<string, number>} */
+  var basisCounts = dict();
+  /** @param {string} id */
+  function basisFiled(id) { return !hiddenByDefault(fileGroup(id)); }
+  /** @param {string} id */
+  function basisDegree(id) {
+    var cache = basisDegrees[state.dim] || (basisDegrees[state.dim] = dict());
+    var key = noteOf(id);
+    if (cache[key] === undefined) {
+      var n = 0, own = basisFiled(key);
+      (adj[key] || []).forEach(function (e) {
+        if (!own || basisFiled(e.o)) n += e.o === key ? 2 : 1;
+      });
+      cache[key] = n;
+    }
+    return cache[key];
+  }
+  /** @param {string} id */
+  function basisShown(id) {
+    return basisFiled(id) && !hiddenByDefault(!basisDegree(id) && !unlinkedByFolder ? UNLINKED : fileGroup(id));
+  }
+  function basisCount() {
+    var key = state.dim + "#" + unlinkedByFolder;
+    if (basisCounts[key] === undefined) {
+      var n = 0;
+      graph.forEachNode(function (id, a) { if (!a.dupOf && basisShown(id)) n++; });
+      basisCounts[key] = n;
+    }
+    return basisCounts[key];
+  }
+  /** @param {string} id */
+  function basisSize(id) {
+    var n = basisDegree(id);
+    return n === 0 ? NODE_ORPHAN : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(n));
+  }
+  /** @param {string} id */
+  function basisRank(id) {
+    var ranks = basisRanks[state.dim];
+    if (!ranks) {
+      ranks = basisRanks[state.dim] = dict();
+      graph.nodes().filter(function (key) { return !graph.getNodeAttribute(key, "dupOf"); })
+        .sort(function (a, b) {
+          return basisDegree(b) - basisDegree(a) ||
+            String(graph.getNodeAttribute(a, "label")).localeCompare(String(graph.getNodeAttribute(b, "label")));
+        }).forEach(function (key, i) { ranks[key] = i; });
+    }
+    return ranks[noteOf(id)];
+  }
+  /** @param {(id: string) => boolean} on @returns {Record<string, number>} */
+  function rankVisible(on) {
+    /** @type {Record<string, number>} */
+    var all = dict();
+    /** @type {Record<string, number>} */
+    var vis = dict();
+    /** @type {Record<string, boolean>} */
+    var seen = dict();
+    graph.forEachNode(function (id) { seen[id] = !!on(id); });
+    graph.forEachNode(function (id) {
+      var own = basisFiled(id);
+      (adj[id] || []).forEach(function (e) {
+        if (own && !basisFiled(e.o)) return;
+        var peer = !oldWorld && leaving[e.o] ? e.o + SAT_SEP + "s" : e.o;
+        var w = e.o === noteOf(id) ? 2 : 1;
+        all[id] = (all[id] || 0) + w;
+        if (seen[id] && seen[peer]) vis[id] = (vis[id] || 0) + w;
+      });
+    });
+    /** @type {Record<string, number>} */
+    var out = dict();
+    graph.forEachNode(function (id) { var n = all[id] || 0; out[id] = n > 0 ? (vis[id] || 0) / n : 1; });
+    return out;
+  }
+  /** @param {string} id */
+  function dotRamp(id) {
+    var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    t = t > 1 ? 1 : t < 0 ? 0 : t;
+    var a = visSrc[id], b = visDst[id];
+    if (a === undefined) a = b === undefined ? 1 : b;
+    if (b === undefined) b = a;
+    return t * (a + (b - a) * visEase);
+  }
+
   /** @type {Record<string, string[]>} */
   var subOrder = dict();
   /** @type {Record<string, number>} */
@@ -959,9 +1059,12 @@ function mountVaultGraph(root, data, deps) {
    * @param {((path: string) => string | undefined) | null} keepId
    */
   function ingest(src, keepId) {
+    restVer++;
     graph.clear();
+    basisDegrees = dict();
+    basisRanks = dict();
+    basisCounts = dict();
     adj = dict();
-    hubRank = dict();
     subOrder = dict();
     subCount = dict();
     idOfPath = dict();
@@ -1020,13 +1123,6 @@ function mountVaultGraph(root, data, deps) {
         ? NODE_ORPHAN
         : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
     });
-
-    // github#58
-    graph.nodes().slice().sort(function (a, b) {
-      return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
-             String(graph.getNodeAttribute(a, "label"))
-               .localeCompare(String(graph.getNodeAttribute(b, "label")));
-    }).forEach(function (id, i) { hubRank[id] = i; });
   }
 
   ingest(DATA, null);
@@ -1038,6 +1134,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
     graph.forEachNode(function (id, a) {
+      // github#86 -- a stand-in is its note, already tallied
+      if (a.standIn) return;
       var f = fileGroup(id, a), sb = fileSub(id, a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
@@ -1115,12 +1213,18 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @param {NodeAttrs} [a] @returns {string} */
   function fileSub(id, a) {
     if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).sub || "";
+    if (parentTagsOnly) return "";
     var f = tagFiling[id];
     return f ? f.sub : "";
   }
 
   /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
   function fileDirs(id, a) {
+    return state.dim === "tag" && parentTagsOnly ? [] : noteDirs(id, a);
+  }
+
+  /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
+  function noteDirs(id, a) {
     if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).dirs || [];
     var f = tagFiling[id];
     return f ? f.dirs : [];
@@ -1134,6 +1238,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {Record<string, boolean> | null} bandLock
    * @property {GeomLock | null} geomLock
    * @property {Record<string, string>} color        id -> the colour it was drawn in there
+   * @property {Record<string, number>} counts
    */
 
   /** @type {Record<string, string> | null} */
@@ -1164,7 +1269,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a note fading out of the left disc is still filed there
     if (leftGroup[id] !== undefined) return leftGroup[id];
     // github#3, github#86 -- "join their folder" means "join their group"
-    if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
+    if (!basisDegree(id) && basisFiled(id)) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
     return fileGroup(id);
   }
 
@@ -1201,7 +1306,6 @@ function mountVaultGraph(root, data, deps) {
       });
       if (tagFiling[id]) tagFiling[sid] = tagFiling[id];
       if (adj[id]) adj[sid] = adj[id];
-      hubRank[sid] = hubRank[id];
       if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
       if (tlMs[id] !== undefined) tlMs[sid] = tlMs[id];
       alpha[sid] = 0;
@@ -1225,6 +1329,7 @@ function mountVaultGraph(root, data, deps) {
   // github#86 -- the note takes its stand-in's seat and presence; it goes
   function dropStandIns() {
     if (!standIns.length && !Object.keys(leaving).length) return;
+    foldSizes = null;
     standIns.forEach(function (sid) {
       var id = graph.getNodeAttribute(sid, "standIn");
       if (graph.hasNode(id)) {
@@ -1234,12 +1339,15 @@ function mountVaultGraph(root, data, deps) {
       if (state.hovered === sid) state.hovered = id;
       if (state.selected === sid) state.selected = id;
       graph.dropNode(sid);
-      delete tagFiling[sid]; delete adj[sid]; delete hubRank[sid];
+      delete tagFiling[sid]; delete adj[sid];
       delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
+      delete visSrc[sid]; delete visDst[sid];
     });
     standIns = [];
     leaving = dict();
     leftGroup = dict();
+    visSrc = visDst = rankVisible(willShow); visEase = 1;
+    countFloorFrom = countFloorTo = measureCountFloor();
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
@@ -1378,7 +1486,7 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- and in the colour rotation, for as long as the switch runs
       if (a.standIn) return;
       var g = leaving[id]
-        ? (!adj[id] && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
+        ? (!basisDegree(id) && basisFiled(id) && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
         : groupOf(id);
       count[g] = (count[g] || 0) + 1;
       // github#86, github#50 -- what this dimension FILES, on the disc or not
@@ -1497,6 +1605,10 @@ function mountVaultGraph(root, data, deps) {
   function applyFolderShown(map, dim) {
     var d = dim === "tag" ? "tag" : "folder";
     dimShown[d] = cleanFolderShown(map);
+    basisDegrees = dict();
+    basisRanks = dict();
+    basisCounts = dict();
+    restVer++;
     return dimShown[d];
   }
 
@@ -1625,8 +1737,6 @@ function mountVaultGraph(root, data, deps) {
   var INNER_FILL = 0.8;
   var GAP_BAND = { i: 0.5, o: 1 };
   var CLEAR_OF_ROOM = 0.12;
-  // github#107 -- ROOM_PCTL, the pick() quantile
-  var ROOM_PCTL = 0.5;
 
   var MIN_SPAN = 6 * Math.PI / 180;
   var HL_PUSH = 0.9;
@@ -1643,8 +1753,6 @@ function mountVaultGraph(root, data, deps) {
    * @property {"i" | "o"} key
    * @property {number} sp        row pitch, in units
    * @property {number} rows
-   * @property {number} room
-   * @property {{ m: number, b: number, lo: number }} ramp
    * @property {number} gapDeg
    * @property {number} nG
    * @property {number} [nSub]   subfolder boundaries in this band, set by the allocator
@@ -1655,8 +1763,8 @@ function mountVaultGraph(root, data, deps) {
   function bandOf(k) {
     if (!BAND) {
       BAND = {
-        i: { key: "i", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
-        o: { key: "o", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
+        i: { key: "i", sp: 1, rows: 0, gapDeg: 0, nG: 0 },
+        o: { key: "o", sp: 1, rows: 0, gapDeg: 0, nG: 0 },
       };
     }
     return k === "i" ? BAND.i : BAND.o;
@@ -1837,8 +1945,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} r        row radius in units (times UNIT for graph units)
    * @property {number} u        position along the cell's arc, 0..1
    * @property {number} row
-   * @property {number} eA       dot size at this row's leading edge
-   * @property {number} eB       and at its trailing edge
+   * @property {number} eA         github#186
+   * @property {number} eB         github#186
    */
   /**
    * A wedge cell: one group, one subfolder slice of a group, or the shared wedge of the
@@ -1874,7 +1982,6 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} sp
    * @property {number} spInner
    * @property {number} density
-   * @property {BandNum} room
    * @property {Record<string, number>} dbgLive
    * @property {Record<string, boolean>} dbgSplit
    * @property {Record<string, number>} presMax
@@ -1894,8 +2001,8 @@ function mountVaultGraph(root, data, deps) {
    */
   /**
    * buildWedgePlan's fourth argument when it is not a bare density: the previous plan's
-   * spacings, room and depth, held so a re-plan does not move what it should not.
-   * @typedef {{ i?: number, o?: number, room?: BandNum, depth?: BandNum }} SpHold
+   * spacings and depth, held so a re-plan does not move what it should not. github#186
+   * @typedef {{ i?: number, o?: number, depth?: BandNum, hold?: Record<string, boolean> }} SpHold
    */
   /**
    * @typedef {Object} AllocOpts
@@ -1954,7 +2061,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** @param {string} id */
-  function isOrphan(id) { return !adj[id]; }
+  function isOrphan(id) { return basisDegree(id) === 0; }
 
   var SEAM_ROWS = 0.3;
 
@@ -1964,7 +2071,8 @@ function mountVaultGraph(root, data, deps) {
   var GAP_FULL_TO = 1000;
   var GAP_ZERO_AT = 10000;
   function gapScale() {
-    var n = graph.order;
+    // github#86 -- a stand-in is its note: the switch must not narrow the gaps
+    var n = basisCount();
     if (n <= GAP_FULL_TO) return 1;
     if (n >= GAP_ZERO_AT) return 0;
     return 1 - (n - GAP_FULL_TO) / (GAP_ZERO_AT - GAP_FULL_TO);
@@ -2157,7 +2265,7 @@ function mountVaultGraph(root, data, deps) {
     var byCell = dict();
     /** @type {Record<string, string[]>} */
     var cellsOf = dict();
-    var planTotal = 0;
+    var planTotal = 0, planCount = 0;
     /** @type {Record<string, number>} */
     var presMax = dict();
 
@@ -2178,14 +2286,14 @@ function mountVaultGraph(root, data, deps) {
     /** @type {string[]} */
     var memberG = [];
     /** @type {string[]} */
-    var leaving = [];
+    var leavers = [];
     var dropped = false;
     if (useSkel && skel) {
       /** @type {Record<string, boolean>} */
       var gone = dict();
-      for (var li = 0, ln = skel.leaving.length; li < ln; li++) {
-        var lid = skel.leaving[li];
-        if ((planKeep || willShow)(lid)) leaving.push(lid);
+      for (var li = 0, ln = skel.leavers.length; li < ln; li++) {
+        var lid = skel.leavers[li];
+        if ((planKeep || willShow)(lid)) leavers.push(lid);
         else { gone[lid] = true; dropped = true; }
       }
       if (!dropped) {
@@ -2204,19 +2312,21 @@ function mountVaultGraph(root, data, deps) {
         }
       }
       for (var mi = 0, mn = members.length; mi < mn; mi++) {
+        // github#186
         var gm = memberG[mi], wm = W(members[mi]);
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
     } else graph.forEachNode(function (id) {
       // github#86 -- the left disc has no stand-ins; the arriving disc no leavers
       if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
-      if (onlyVisible && !(planKeep || willShow)(id)) return;
+      if (onlyVisible ? !(planKeep || willShow)(id) : !basisShown(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
       var g0 = groupOf(id);
       memberG.push(g0);
-      if (skel && onlyVisible && !willShow(id)) leaving.push(id);
+      if (skel && onlyVisible && !willShow(id)) leavers.push(id);
+      // github#186
       var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
       liveN[g0] = (liveN[g0] || 0) + 1;
@@ -2266,7 +2376,9 @@ function mountVaultGraph(root, data, deps) {
         var mA = graph.getNodeAttributes(mId);
         var mSub = fileSub(mId, mA);
         var mBk = bandLock && bandLock[mG] ? "i" : "o";
-        var mKey = splitFor(mG)
+        var held = cellHold ? cellHold[mId] : undefined;
+        var mKey = held !== undefined && held.split(SEP)[0] === mG ? held
+          : splitFor(mG)
           ? mG + SEP + subCellIndex(mG, mSub, liveSub[mG + "/" + mSub] || 0, bandDepth[mBk])
           : mG;
         if (!byCell[mKey]) {
@@ -2276,9 +2388,11 @@ function mountVaultGraph(root, data, deps) {
         byCell[mKey].push(mId);
       }
       var pw = W(mId);
-      planTotal += pw;
-      if (colWalk && colWalk[mG] !== undefined) pw = colWalk[mG].f;
-      if (!(presMax[mG] >= pw)) presMax[mG] = pw;
+      planTotal += pw; planCount++;
+      // github#186, decisions/0006
+      var pv = pw;
+      if (colWalk && colWalk[mG] !== undefined) pv = colWalk[mG].f;
+      if (!(presMax[mG] >= pv)) presMax[mG] = pv;
     }
 
     /** @type {string[]} */
@@ -2289,7 +2403,7 @@ function mountVaultGraph(root, data, deps) {
     else {
       ringsMerged = dict();
       all.filter(function (g) { return cellsOf[g]; }).forEach(function (g) {
-        if ((counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
+        if (g === UNLINKED || g === UNTAGGED || (counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
         ringsMerged[g] = true;
         cellsOf[g].forEach(function (k) { smallIds = smallIds.concat(byCell[k]); });
       });
@@ -2310,13 +2424,13 @@ function mountVaultGraph(root, data, deps) {
     if (!cells.length) return null;
 
     cells.forEach(function (c) {
-      if (!useCells) c.list.sort(function (a, b) { return hubRank[a] - hubRank[b]; });
+      if (!useCells) c.list.sort(function (a, b) { return basisRank(a) - basisRank(b); });
       c.wsum = 0;
       c.list.forEach(function (id) { c.wsum += W(id); });
     });
     if (skel) {
       if (!useSkel || dropped) {
-        skel.members = members; skel.memberG = memberG; skel.leaving = leaving;
+        skel.members = members; skel.memberG = memberG; skel.leavers = leavers;
         skel.liveN = liveN; skel.liveSub = liveSub;
         skel.keep = planKeep; skel.dim = state.dim; skel.order = all;
         skel.pinned = state.pinned.join(SEP); skel.onlyVisible = !!onlyVisible;
@@ -2329,14 +2443,15 @@ function mountVaultGraph(root, data, deps) {
       skel.filled = true;
     }
 
-    var TOTAL = planTotal;
+    // github#186, decisions/0017 -- the hub and the ring seed are COUNTS, not weights
+    var TOTAL = planCount;
     var MIN = MIN_SPAN, TWO = arcSpan();
     var smallAt = TOTAL * (MIN / TWO);
     // github#97
     /** @type {Record<string, boolean>} */
     var groupInner = dict();
     cells.forEach(function (c) {
-      var small = c.wsum < smallAt;
+      var small = c.list.length < smallAt;
       if (groupInner[c.g] === undefined) groupInner[c.g] = small;
       else groupInner[c.g] = groupInner[c.g] || small;
     });
@@ -2352,10 +2467,11 @@ function mountVaultGraph(root, data, deps) {
       outer = cells; inner = [];
     }
 
-    /** @param {Cell[]} list @param {string} band */
-    var share = function (list, band) {
+    // github#186
+    /** @param {Cell[]} list @param {string} band @param {(c: Cell) => number} [wOf] */
+    var share = function (list, band, wOf) {
       var a = allocateBand(list,
-                           function (c) { return c.wsum; },
+                           wOf || function (c) { return c.wsum; },
                            { subGaps: false, clamp: null, totFloor: 0.0001, band: band });
       lastGapN[band] = Math.round(a.nG * 1000) / 1000;
       list.forEach(function (c) { c.band = a.shareOf(c); });
@@ -2380,7 +2496,6 @@ function mountVaultGraph(root, data, deps) {
           ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
     var SP = density;
 
-    var givenRoom = given && given.room ? given.room : null;
     var SP_I = given && given.i > 0 ? given.i : SP;
     var SP_O = given && given.o > 0 ? given.o : SP;
     /** @param {Cell[]} cells @param {string} key */
@@ -2440,11 +2555,14 @@ function mountVaultGraph(root, data, deps) {
       });
       /** @type {Record<string, boolean>} */
       var pinnedInner = dict();
-      // github#117
+      // github#117, github#119 -- the pooled tail stays where its tags sat
       names.forEach(function (g) {
-        if ((groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
+        if (g === MERGED || (groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
       });
       var movable = names.filter(function (g) { return !pinnedInner[g]; });
+      // github#186, decisions/0017
+      /** @param {Cell} c */
+      var countOf = function (c) { return c.list.length; };
       // github#117 -- the pin above can MOVE a group, so land it on both paths out
       var applyAssign = function () {
         cells.forEach(function (c) { c.inner = !!assign[c.g]; });
@@ -2465,19 +2583,19 @@ function mountVaultGraph(root, data, deps) {
       var spanFor = function (ins, outs, rv) {
         var iR = 0;
         ins.forEach(function (c) {
-          var r = rowsNeeded(usableRef(c, rv), c.wsum, rv);
+          var r = rowsNeeded(usableRef(c, rv), countOf(c), rv);
           if (r > iR) iR = r;
         });
         var rOut = ins.length ? rv + iR * SP + GUTTER : rv;
         var oR = 0;
         outs.forEach(function (c) {
-          var r = rowsNeeded(usableRef(c, rOut), c.wsum, rOut);
+          var r = rowsNeeded(usableRef(c, rOut), countOf(c), rOut);
           if (r > oR) oR = r;
         });
         // github#117
         var nI = 0, nO = 0;
-        ins.forEach(function (c) { nI += c.wsum; });
-        outs.forEach(function (c) { nO += c.wsum; });
+        ins.forEach(function (c) { nI += countOf(c); });
+        outs.forEach(function (c) { nO += countOf(c); });
         var iHi = (rv + iR * SP) * INNER_SCALE, iLo = rv * INNER_SCALE;
         var oHi = rOut + oR * SP, oLo = rOut;
         var rpI = nI > 0.0001 ? Math.max(0, iHi * iHi - iLo * iLo) / nI : 0;
@@ -2501,7 +2619,7 @@ function mountVaultGraph(root, data, deps) {
         var outs = [];
         cells.forEach(function (c) { (a[c.g] ? ins : outs).push(c); });
         if (!ins.length || !outs.length) return { cost: Infinity, r0: R0_BASE };
-        share(ins, "i"); share(outs, "o");
+        share(ins, "i", countOf); share(outs, "o", countOf);
         cells.forEach(function (c) { c.bandRef = c.band; });
 
         var biggestInner = 0, smallestOuter = Infinity;
@@ -2565,24 +2683,28 @@ function mountVaultGraph(root, data, deps) {
         }
       }
 
-      applyAssign();
-
+      // github#186
       r0 = evaluate(assign).r0;
+      applyAssign();
     })();
 
-    if (!given) {
-      SP_I = bandDensity(inner, "i");
-      SP_O = bandDensity(outer, "o");
-    }
+    // github#186
+    /** @param {string} k */
+    var heldBand = function (k) {
+      if (!given) return false;
+      return given.hold ? !!given.hold[k] : true;
+    };
+    if (!heldBand("i")) SP_I = bandDensity(inner, "i");
+    if (!heldBand("o")) SP_O = bandDensity(outer, "o");
 
-    /** @param {Cell[]} list @param {number} base @param {number} thick @param {number} scale @param {number} sp */
-    var solveBand = function (list, base, thick, scale, sp) {
+    /** @param {Cell[]} list @param {number} base @param {number} thick @param {number} scale @param {number} sp @param {boolean} held */
+    var solveBand = function (list, base, thick, scale, sp, held) {
       if (!list.length) return { sp: sp, rows: 0 };
       var n = 0;
       list.forEach(function (c) { n += c.wsum; });
       // github#5
       if (!(n > 0.0001)) return { sp: sp, rows: 0 };
-      if (given || !(thick > 0) || !(n > 0.5)) {
+      if (held || !(thick > 0) || !(n > 0.5)) {
         var rk = Math.round(thick > 0 && sp > 0 ? thick / sp : 1);
         return { sp: sp, rows: rk > 0 ? rk : 1 };
       }
@@ -2606,7 +2728,7 @@ function mountVaultGraph(root, data, deps) {
     var thickI = geomLock ? (geomLock.rOuter - geomLock.r0) * INNER_FILL : 0;
     var innerRows = 0;
     if (geomLock && thickI > 0) {
-      var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
+      var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I, heldBand("i"));
       SP_I = si.sp; innerRows = si.rows;
       // github#5
       inner.forEach(function (c) { c.rows = c.wsum > 0.0001 ? innerRows : 0; });
@@ -2622,10 +2744,12 @@ function mountVaultGraph(root, data, deps) {
     var thickO = geomLock ? geomLock.maxR - geomLock.rOuter : 0;
     var maxR = rOuter, outerRows = 0;
     if (geomLock && thickO > 0) {
-      var so = solveBand(outer, rOuter, thickO, 1, SP_O);
+      var so = solveBand(outer, rOuter, thickO, 1, SP_O, heldBand("o"));
       SP_O = so.sp; outerRows = so.rows;
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
-      maxR = rOuter + outerRows * SP_O;
+      // github#186 -- the walked depth: round() shifts the ring at .5
+      var depthO = spIn && typeof spIn === "object" && spIn.depth ? spIn.depth.o : 0;
+      maxR = rOuter + (depthO > 0 ? depthO : outerRows) * SP_O;
       // github#157 -- take back only the overshoot; fitRatio frames by maxR
       if (maxR > geomLock.maxR) maxR = geomLock.maxR;
     } else {
@@ -2648,7 +2772,10 @@ function mountVaultGraph(root, data, deps) {
       var pad = typeof c.pad === "number" ? c.pad : padFor(base, c.bandRef);
       var span = 1 - 2 * pad;
       var centred = bandRows > 0 && nEff > 0.0001 && nEff < bandRows - 0.0001;
-      var cStart = centred ? Math.round((bandRows - nEff) / 2) : 0;
+      // github#186 -- a half rounds INWARD: a lone note sits nearest the hub
+      var cStart = centred ? Math.floor((bandRows - nEff) / 2) : 0;
+      // github#186, decisions/0002 -- the top slot's OUTER EDGE may not pass the rail
+      var rowCap = Math.max(0, Math.floor(rows - 0.5 + 1e-9));
       /** @type {{ id: string, w: number, row: number }[]} */
       var recs = [];
       var acc = 0;
@@ -2663,11 +2790,12 @@ function mountVaultGraph(root, data, deps) {
           ? (-base + Math.sqrt(Math.max(0, base * base + 2 * SP * target))) / SP
           : target / Math.max(1e-9, base);
         if (pp < 0) pp = 0;
-        if (pp > rows - 1e-9) pp = Math.max(0, rows - 1e-9);
+        if (pp > rowCap) pp = rowCap;
         var cRow = 0;
         if (centred) {
           var top = Math.max(0, Math.ceil(nEff - 0.0001) - 1);
           cRow = cStart + Math.min(Math.floor(s * nEff), top);
+          if (cRow > rowCap) cRow = rowCap;
         }
         recs.push({ id: id, w: w, row: centred ? cRow : Math.floor(pp) });
       });
@@ -2678,17 +2806,10 @@ function mountVaultGraph(root, data, deps) {
       var rowFirst = dict();
       /** @type {Record<string, number>} */
       var rowLast = dict();
-      /** @type {Record<string, number>} */
-      var edgeA = dict();
-      /** @type {Record<string, number>} */
-      var edgeB = dict();
       recs.forEach(function (r) {
         rowW[r.row] = (rowW[r.row] || 0) + r.w;
         if (rowFirst[r.row] === undefined) rowFirst[r.row] = r.w;
         rowLast[r.row] = r.w;
-        var dz = graph.getNodeAttribute(r.id, "size") || 4;
-        if (edgeA[r.row] === undefined) edgeA[r.row] = dz;
-        edgeB[r.row] = dz;
       });
       /** @type {Record<string, number>} */
       var rowAcc = dict();
@@ -2711,7 +2832,8 @@ function mountVaultGraph(root, data, deps) {
                      rr: rr, inner: !!c.inner });
         }
         var u0 = (r.row % 2 === 1) ? 1 - t : t;
-        var eA = edgeA[r.row] || 0, eB = edgeB[r.row] || 0;
+        // github#186
+        var eA = 2 * hA, eB = 2 * hB;
         out.push({ id: r.id, r: rr, u: pad + u0 * span, row: r.row,
                    eA: (r.row % 2 === 1) ? eB : eA,
                    eB: (r.row % 2 === 1) ? eA : eB });
@@ -2726,27 +2848,6 @@ function mountVaultGraph(root, data, deps) {
       c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
     });
 
-    /** @param {Cell[]} list */
-    var roomOf = function (list) {
-      /** @type {number[]} */
-      var v = [];
-      list.forEach(function (c) {
-        if (!c.slots || !c.slots.length) return;
-        /** @type {Record<string, number>} */
-        var rn = dict();
-        c.slots.forEach(function (sl) { rn[sl.r] = (rn[sl.r] || 0) + 1; });
-        c.slots.forEach(function (sl) {
-          var n = rn[sl.r] || 1;
-          var step = (c.band || 0) * sl.r * UNIT / n;
-          if (step > 1) v.push(step);
-        });
-      });
-      if (!v.length) return 0;
-      v.sort(function (x, y) { return x - y; });
-      return v[Math.floor(v.length * 0.1)];
-    };
-    var roomPlan = givenRoom || { i: roomOf(inner), o: roomOf(outer) };
-
     /** @param {Cell[]} list @param {number} fallback @param {string} band */
     var depthOf = function (list, fallback, band) {
       var given = spIn && typeof spIn === "object" && spIn.depth ? spIn.depth[band] : 0;
@@ -2755,29 +2856,28 @@ function mountVaultGraph(root, data, deps) {
     };
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
-             sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
+             sp: SP_O, spInner: SP_I, density: density,
              dbgLive: liveG, dbgSplit: splitOf, presMax: presMax,
              rows: { i: depthOf(inner, innerRows, "i"),
                      o: depthOf(outer, outerRows || REF_ROWS, "o") } };
   }
 
   var REPACK_BELOW = 0.55;
+  /** @type {Record<string, { cell: string, at: number }>} */
+  var pathSeats = dict();
 
   /**
    * @param {Plan | null} [planIn]   a plan to lay out; built from the live alphas when absent
    * @param {boolean} [strict]
+   * @param {(c: Cell, sl: Slot) => Slot} [walk]
    * @returns {Record<string, Point> | null}   node id -> position, or null with nothing to show
    */
-  function ringsLayout(planIn, strict) {
+  function ringsLayout(planIn, strict, walk) {
     // github#41, design/0011
     if (trace) {
-      tracePut({ what: "pass", roomIn_i: bandOf("i").room, roomIn_o: bandOf("o").room,
-                 hasRoomNow: !!roomNow, hasCellNow: !!cellNow, hasEdgeNow: !!edgeNow,
+      tracePut({ what: "pass", roomIn_i: pitchUnits("i"), roomIn_o: pitchUnits("o"),
+                 hasRoomNow: false, hasCellNow: !!cellNow, hasEdgeNow: !!edgeNow,
                  strict: !!strict, givenPlan: !!planIn });
-    }
-    if (roomNow) {
-      if (roomNow.i > 1) bandOf("i").room = roomNow.i;
-      if (roomNow.o > 1) bandOf("o").room = roomNow.o;
     }
     // github#19
     // decisions/0001
@@ -2826,14 +2926,8 @@ function mountVaultGraph(root, data, deps) {
     var lastAt = null;
     /** @type {Record<string, { t: number, id: string }> | null} */
     var firstAt = null;
-    /** @type {Record<string, number[]>} */
-    var roomPool = { i: [], o: [] };
     /** @type {Record<string, number>} */
     var cellRoomNext = dict();
-    /** @type {Record<string, number>} */
-    var cellMin = dict();
-    /** @type {Record<string, string>} */
-    var cellOf = dict();
     /** @type {Record<string, number>} */
     var edgeCapNext = dict();
     /** @type {Record<string, boolean>} */
@@ -2934,20 +3028,19 @@ function mountVaultGraph(root, data, deps) {
                           ids: c.slots.map(function (sl) { return sl.id; }) });
         }
 
+        // github#186
         /** @type {Record<string, number>} */
         var rowN = dict();
         c.slots.forEach(function (sl) {
           var w = alpha[sl.id] || 0;
           if (w > 0) rowN[sl.r] = (rowN[sl.r] || 0) + w;
         });
-        var rowsUsed = 0;
-        Object.keys(rowN).forEach(function (rk) {
-          rowsUsed += rowN[rk] > 1 ? 1 : rowN[rk];
-        });
-        if (!(rowsUsed > 0)) rowsUsed = 1;
-        var maxRowR = -1;
-        Object.keys(rowN).forEach(function (rk) { if (+rk > maxRowR) maxRowR = +rk; });
+        // github#186, decisions/0017 -- one ceiling per cell, never per note
+        var cellMin = Infinity;
         c.slots.forEach(function (sl) {
+          var slotR = sl.r;
+          if (walk) sl = walk(c, sl);
+          else pathSeats[sl.id] = { cell: c.k, at: 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u) };
           if (!present(sl.id)) return;
           var rs = rowShare ? rowShare[Math.round(sl.r * 1000)] : null;
           var sm = seamAt(sl.r * UNIT, rs ? rs.nB : nB, isInner ? "i" : "o");
@@ -2962,6 +3055,11 @@ function mountVaultGraph(root, data, deps) {
             a0 = arcFrom() + sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
             a1 = a0 + sm.avail * frac * open;
           }
+          if (planArc) {
+            a0 = Math.max(planArc.from, Math.min(planArc.to, a0));
+            a1 = Math.max(planArc.from, Math.min(planArc.to, a1));
+          }
+          if (walk && a1 < a0) a0 = a1 = (a0 + a1) / 2;
           if (probe && probe.watch === sl.id) {
             probe.watched = { k: c.k, g: c.g, u: Math.round(sl.u * 1e5) / 1e5,
                               slotR: Math.round(sl.r), slots: c.slots.length,
@@ -2976,19 +3074,19 @@ function mountVaultGraph(root, data, deps) {
           var rGraph = Math.max(1e-6, sl.r * UNIT);
           if (isInner && sl.row === 0) hubRow0Next[sl.id] = true;
           var bk = isInner ? "i" : "o";
-          var room = bandOf(bk).room > 1 ? bandOf(bk).room : pitchUnits(bk);
-          var clear = CLEAR_OF_ROOM * room * (GAP_BAND[bk] || 1);
-          var nRow = rowN[sl.r] > 0.001 ? rowN[sl.r] : 1;
-          if (nRow > 1.5) {
-            var ownStep = arc * rGraph / nRow;
-            roomPool[isInner ? "i" : "o"].push(ownStep);
-            if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
-          }
-          cellOf[sl.id] = c.k;
-          var side = function (z) {
-            var f = (z || NODE_MAX) / NODE_MAX;
-            if (f > 1) f = 1; else if (f < 0.15) f = 0.15;
-            return (clear + DOT_OF_PITCH * room * f) / rGraph;
+          // github#186, decisions/0017
+          var pitU = pitchUnits(bk);
+          var rowWs = rowN[slotR] > 1e-9 ? rowN[slotR] : 0;
+          var wSelf = alpha[sl.id] || 0;
+          /** @param {number} shr */
+          var slotOf = function (shr) { return arc * rGraph * (shr > 0 ? shr : 1); };
+          var own = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
+          if (own > 0 && own < cellMin) cellMin = own;
+          /** @param {number} shr */
+          var side = function (shr) {
+            var u = slotOf(shr);
+            if (u > pitU) u = pitU;
+            return (CLEAR_OF_ROOM * u * (GAP_BAND[bk] || 1) + DOT_OF_PITCH * u) / rGraph;
           };
           var mgA = side(sl.eA), mgB = side(sl.eB);
           var arcCap = arc * 0.66;
@@ -2999,13 +3097,15 @@ function mountVaultGraph(root, data, deps) {
           var t = sweepAngle(a0 + mgA + (arc - mgA - mgB) * sl.u);
           var spanArc = arc - mgA - mgB;
           var dEdge = Math.min(mgA + spanArc * sl.u, mgB + spanArc * (1 - sl.u)) * rGraph;
-          if (dEdge > 0) edgeCapNext[sl.id] = dEdge;
+          if (planArc) dEdge = rGraph * Math.sin(Math.min(Math.PI / 2, Math.max(0, dEdge / rGraph)));
+          if (dEdge >= 0) edgeCapNext[sl.id] = dEdge;
           // github#41, design/0011
           if (trace && trace.id === sl.id) {
             tracePut({ what: "edge", cell: c.k, g: c.g, u: sl.u, arc: arc, mgA: mgA, mgB: mgB,
                        spanArc: spanArc, rGraph: rGraph, slotR: sl.r, dEdge: dEdge,
-                       a0: a0, nRow: nRow, geom: c.geom, live: c.live, span: c.span,
-                       sideClear: clear, sideRoom: room, sideEA: sl.eA, sideEB: sl.eB });
+                       a0: a0, nRow: rowWs, geom: c.geom, live: c.live, span: c.span,
+                       sideClear: CLEAR_OF_ROOM * slotOf(1), sideRoom: slotOf(1),
+                       sideEA: sl.eA, sideEB: sl.eB });
           }
           var dLo = (mgA + spanArc * sl.u) * rGraph;
           var dHi = (mgB + spanArc * (1 - sl.u)) * rGraph;
@@ -3026,6 +3126,16 @@ function mountVaultGraph(root, data, deps) {
           var rr = sl.r + (pushOn && isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
+        // github#186, decisions/0017
+        // github#202
+        if (cellMin < Infinity && fitCap &&
+            c.slots.filter(function (sl) { return present(sl.id); }).length <= FEW_IN_CELL) {
+          cellMin = Math.max(cellMin, pitchUnits(isInner ? "i" : "o"));
+        }
+        if (cellMin < Infinity) c.slots.forEach(function (sl) {
+          if (present(sl.id)) cellRoomNext[sl.id] = cellMin;
+        });
+        // github#186
         fracBefore += frac * open;
       });
       // github#86 -- a partial disc has two open ends and no wrap seam
@@ -3052,27 +3162,12 @@ function mountVaultGraph(root, data, deps) {
                                     y: graph.getNodeAttribute(id, "y") };
     });
 
-    var pool = roomPool;
-    // github#35
-    // github#107 -- ROOM_PCTL 0.1 -> 0.5, inner band's pool is more dispersed
-    /** @param {number[]} v */
-    var pick = function (v) {
-      if (!v.length) return undefined;
-      v.sort(function (x, y) { return x - y; });
-      return v[Math.floor(v.length * ROOM_PCTL)];
-    };
-    if (!roomNow) {
-      bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
-    }
     // github#160 -- shift the outer band out by row 0's largest dot radius
     // github#35 -- the inner band keeps HUB_ROW0_FRAC of the hub on purpose
     var insetO = 0;
-    var roomO = roomNow ? roomNow.o : bandOf("o").room;
-    if (plan.sp > 0 && plan.rows && plan.rows.o > 0 && roomO > 1) {
+    if (plan.sp > 0 && plan.rows && plan.rows.o > 0) {
       var pitO = UNIT * plan.sp;
-      var hiO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD);
-      var fO = Math.min(roomO * 0.92 / pitO, DOT_ROOM_MAX);
-      insetO = hiO * fO / UNIT;
+      insetO = DOT_OF_PITCH * DOT_CLEAR * Math.min(pitO, UNIT * DOT_MAX_SPREAD) / UNIT;
       var slackO = (plan.maxR - plan.rOuter) - (plan.rows.o - 1) * plan.sp - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, insetO + slackO);
       if (insetO > 0) {
@@ -3090,13 +3185,9 @@ function mountVaultGraph(root, data, deps) {
       }
     }
     if (trace) {
-      tracePut({ what: "passEnd", roomOut_i: bandOf("i").room, roomOut_o: bandOf("o").room,
-                 measured: !roomNow });
+      tracePut({ what: "passEnd", roomOut_i: pitchUnits("i"), roomOut_o: pitchUnits("o"),
+                 measured: true });
     }
-    Object.keys(cellOf).forEach(function (id) {
-      var m = cellMin[cellOf[id]];
-      if (m > 1) cellRoomNext[id] = m;
-    });
     cellRoom = cellNow || cellRoomNext;
     edgeCap = edgeNow || edgeCapNext;
     hubRow0 = hubRow0Next;
@@ -3788,6 +3879,15 @@ function mountVaultGraph(root, data, deps) {
         if (last && last.g === c.g) { last.b = c; return; }
         runs.push({ g: c.g, band: bk, a: c, b: c });
       });
+      // github#186
+      /** @param {{ g: string, a: DbgCell, b: DbgCell }} run */
+      var drawnFrac = function (run) {
+        var d = 0;
+        band.forEach(function (c) {
+          if (c.g === run.g && c.f0 >= run.a.f0 - 1e-12 && c.f1 <= run.b.f1 + 1e-12) d += c.f1 - c.f0;
+        });
+        return d;
+      };
       /** @param {{ g: string, a: DbgCell, b: DbgCell }} run */
       var noteFrac = function (run) {
         var lo = Infinity, hi = -Infinity;
@@ -3818,6 +3918,7 @@ function mountVaultGraph(root, data, deps) {
                    gap: sm.gap * 180 / Math.PI, avail: sm.avail * 180 / Math.PI,
                    start: deg(sw(run.a, "f0")), end: deg(sw(run.b, "f1")),
                    arc: (sw(run.b, "f1") - sw(run.a, "f0")) * 180 / Math.PI,
+                   drawn: drawnFrac(run) * sm.avail * 180 / Math.PI,
                    centre: deg((lo + hi) / 2) });
       });
     });
@@ -4115,6 +4216,9 @@ function mountVaultGraph(root, data, deps) {
   function present(id) { return (alpha[id] || 0) > 0.004; }
   function syncAlpha() {
     graph.forEachNode(function (id) { alpha[id] = visible(id) ? timeFactor(id) : 0; });
+    // github#186 -- the rank follows what is on screen
+    visSrc = visDst = rankVisible(willShow); visEase = 1;
+    countFloorFrom = countFloorTo = measureCountFloor();
     // github#40, design/0012
     trailRefresh();
   }
@@ -4151,6 +4255,19 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0015 -- a dot is fully gone, or fully lit, this far behind its edge
   var HAND_FADE_DEG = 12;
   var RADIAL_EASE = 0.25;
+  // github#186 -- a hop's top speed, as a share of the pitch
+  var RADIAL_STEP_MAX = 0.12;
+  // github#186 -- a deferred fit starts here in the walk and lands with it
+  var FIT_RIDE_AT = 0.66;
+  // github#186 -- a departing note's links are gone by this share of the walk
+  var LEAVE_EDGE_BY = 0.35;
+  /** @type {Record<string, boolean> | null} */
+  var departing = null;
+  var leaveEdgeK = 1;
+  // github#186, design/0015 -- the worlds overlap while the rows fold
+  var foldSwitch = true;
+  // github#186, design/0015
+  var FOLD_ROOM_AT = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4186,7 +4303,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} depthO
    * @property {string[]} members
    * @property {string[]} memberG
-   * @property {string[]} leaving   members kept only while present: they drop out as they fade
+   * @property {string[]} leavers   members kept only while present: they drop out as they fade
    * @property {Record<string, number>} liveN
    * @property {Record<string, number>} liveSub
    * @property {Record<string, boolean>} splitOf
@@ -4202,7 +4319,7 @@ function mountVaultGraph(root, data, deps) {
   /** @returns {PlanSkel} */
   function freshSkel() {
     return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false,
-             depthI: 0, depthO: 0, members: [], memberG: [], leaving: [], liveN: dict(), liveSub: dict(),
+             depthI: 0, depthO: 0, members: [], memberG: [], leavers: [], liveN: dict(), liveSub: dict(),
              splitOf: dict(), byCell: dict(), cellsOf: dict(), big: [], smallIds: [], merged: dict() };
   }
   /** @param {Plan | null} a @param {Plan | null} b @returns {string} empty when the plans agree */
@@ -4334,8 +4451,6 @@ function mountVaultGraph(root, data, deps) {
     return fitCap;
   }
   var lastMinArc = 0;
-  /** @type {BandNum | null} */
-  var roomNow = null;
   /** @type {Record<string, { f: number, n: number }> | null} */
   var colWalk = null;
   // github#86, design/0015 -- under the hand a fading dot shrinks to nothing
@@ -4343,6 +4458,17 @@ function mountVaultGraph(root, data, deps) {
   var shrinkFade = false;
   /** @type {Record<string, boolean> | null} */
   var splitHold = null;
+  // github#186 -- each note's cell, fixed for a cascade
+  /** @type {Record<string, string> | null} */
+  var cellHold = null;
+  /** @type {Record<string, number> | null} */
+  var foldSizes = null;
+  // github#186 -- one place drops what a walk held, wherever it is cut short
+  function clearHolds() {
+    moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
+    colWalk = null; departing = null; leaveEdgeK = 1;
+    foldSizes = null;
+  }
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
   /** @type {Record<string, number>} */
@@ -4388,6 +4514,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [spread]                      stagger window, frames
    * @property {boolean} [cross]                       github#76: swap two discs in one sweep
    * @property {boolean} [hand]                        github#86: one clock sweep, by angle
+   * @property {boolean} [fold]                        github#186, design/0015
    * @property {LeftDisc} [from]                       github#86: the disc being left
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
@@ -4401,6 +4528,14 @@ function mountVaultGraph(root, data, deps) {
   function cascade(done, opts) {
     if (dead) return;                      // github#62
     opts = opts || {};
+    /** @type {Record<string, { cell: string, at: number }>} */
+    var seatsFrom = Object.assign(dict(), pathSeats);
+    var folding = !!(opts.fold && opts.hand && opts.from);
+    /** @typedef {{ plan: Plan, members: Record<string, boolean>, cells: Record<string, string>, seats: Record<string, { cell: string, at: number }> }} FoldPlan */
+    /** @type {FoldPlan | null} */
+    var foldA = null;
+    /** @type {FoldPlan | null} */
+    var foldB = null;
     stopPlay();
     trailRefresh();                        // github#40, design/0012
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
@@ -4410,36 +4545,60 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    moveFrom = null; splitHold = null; leftColor = null;
+    clearHolds();
+    // github#186 -- the rank walks from where it is to the destination's
+    (function () {
+      /** @type {Record<string, number>} */
+      var cur = dict();
+      graph.forEachNode(function (id) {
+        var a = visSrc[id], b = visDst[id];
+        if (a === undefined) a = b === undefined ? 1 : b;
+        if (b === undefined) b = a;
+        cur[id] = a + (b - a) * visEase;
+      });
+      countFloorFrom = countFloorPx(); countFloorTo = measureCountFloor();
+      visSrc = cur; visDst = rankVisible(willShow); visEase = 0;
+    })();
     // github#86 -- only the switch's own cascade draws stand-ins
     if (!opts.hand && standIns.length) dropStandIns();
     // github#86 -- the left disc keeps its own colours while it stands
     if (opts.from && opts.from.color) leftColor = opts.from.color;
-    shrinkFade = !!opts.hand;
+    shrinkFade = !!opts.hand && !folding;
 
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
     if (opts.fullRing !== undefined) fullRing = !!opts.fullRing;
 
-    planKeep = function (id) { return willShow(id) || present(id); };
+    // github#186
+    planKeep = function (id) {
+      if (willShow(id) || present(id)) return true;
+      if (!wasPresent || !bandGone || !wasPresent[id]) return false;
+      return !!bandGone[bandLock && bandLock[groupOf(id)] ? "i" : "o"];
+    };
     pinPlan();
     colWalk = null;
     /** @type {Record<string, number>} */
     var keep = dict();
     graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
-    var pinWas = pinnedPlan, keepWas = planKeep, roomWas = roomNow;
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    var pinWas = pinnedPlan, keepWas = planKeep;
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
     ringsLayout();
     /** @type {Record<string, Point>} */
     var finalPos = ringsLayout() || {};
     // github#14
     var deferredAutoFit = false;
+    // github#186 -- the destination's fit, taken now for the ride
+    /** @type {{ x: number, y: number, ratio: number, angle: number } | null} */
+    var deferredFitTo = null;
+    var fitRode = false;
+    var sourceSizeRatio = renderer.getCamera().getState().ratio || 1;
+    var targetSizeRatio = opts.colToggle && camAtRest ? fitRatio() : sourceSizeRatio;
     if (opts.colToggle && camAtRest) {
-      if (fitRatio() < renderer.getCamera().getState().ratio) deferredAutoFit = true;
+      if (fitRatio() < renderer.getCamera().getState().ratio) { deferredAutoFit = true; deferredFitTo = fitTarget(); }
       else fit();
     }
-    pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
+    pinnedPlan = pinWas; planKeep = keepWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     /** @type {Record<string, number>} */
     var sweepOf = dict();
@@ -4491,7 +4650,7 @@ function mountVaultGraph(root, data, deps) {
     if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0,
                       skelFrames: 0, skelMismatch: 0, skelFirst: "" };
-      pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
+      pinnedPlan = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
     }
 
     /** @param {string} a @param {string} b */
@@ -4509,6 +4668,11 @@ function mountVaultGraph(root, data, deps) {
     };
     /** @type {Record<string, number>} */
     var delay = dict();
+    // github#186
+    /** @type {Record<string, number>} */
+    var fadeOf = dict();
+    /** @type {Record<string, boolean>} */
+    var byDate = dict();
     [ins, outs].forEach(function (set) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
@@ -4609,6 +4773,11 @@ function mountVaultGraph(root, data, deps) {
     // github#145 -- a flag, not a count
     /** @type {Record<string, boolean>} */
     var tglMv = dict();
+    // github#186
+    /** @type {Record<string, string[]>} */
+    var tglIds = dict();
+    /** @type {Record<string, number>} */
+    var tglFull = dict();
     if (opts.colToggle) (function () {
       /** @type {Record<string, number>} */
       var startN = dict();
@@ -4642,6 +4811,13 @@ function mountVaultGraph(root, data, deps) {
       });
       Object.keys(inN).forEach(function (g0) {
         if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; if (mvInN[g0]) tglMv[g0] = true; }
+      });
+      // github#186 -- the full is the notes taking part, at their lit endpoint
+      graph.forEachNode(function (id) {
+        var g0 = groupOf(id);
+        if (tglDir[g0] === undefined || tglMv[g0]) return;
+        (tglIds[g0] || (tglIds[g0] = [])).push(id);
+        tglFull[g0] = (tglFull[g0] || 0) + (tglDir[g0] === "out" ? (alpha[id] || 0) : (to[id] || 0));
       });
     })();
 
@@ -4692,13 +4868,18 @@ function mountVaultGraph(root, data, deps) {
     })();
 
     var moving = ins.concat(outs).concat(moves);
+    // github#186
+    departing = dict();
+    outs.forEach(function (id) { if (!isMove[id]) departing[id] = true; });
+    leaveEdgeK = 1;
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
                     path: "animated", frames: 0, ms: 0, t0: NOW(),
                     skelFrames: 0, skelMismatch: 0, skelFirst: "" };
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null; leftColor = null; shrinkFade = false;
+      clearHolds();
+      visSrc = visDst; visEase = 1;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -4711,24 +4892,36 @@ function mountVaultGraph(root, data, deps) {
       heatSig = "";
       pinnedPlan = null;
       planKeep = null;
-      roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
+      cellNow = null; edgeNow = null; posSrc = null;
       colWalk = null;
       assignPositions(finalPos);
+      if (opts.hand && standIns.length) dropStandIns();
       // github#21
       ringsLayout();
       ringsLayout();
+      // github#186 -- a landing at an unfiltered rest is a rest to size against
+      takeRestDots();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
-      if (deferredAutoFit && camAtRest) fit();
+      if (deferredAutoFit && !fitRode && camAtRest) fit();
       if (done) done();
     };
 
     /** @param {string} id */
     var weightOf = function (id) { return alpha[id] || 0; };
+    // github#186, design/0015
+    /** @param {string} id */
+    var foldWeightOf = function (id) {
+      var q = Math.min(1, (alpha[id] || 0) / FOLD_ROOM_AT);
+      return q * q * (3 - 2 * q);
+    };
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
-    graph.forEachNode(function (id) { wasPresent[id] = present(id); });
+    graph.forEachNode(function (id) {
+      wasPresent[id] = present(id);
+      if (!wasPresent[id]) delete seatsFrom[id];
+    });
 
     var ovAfter = true;
 
@@ -4736,10 +4929,9 @@ function mountVaultGraph(root, data, deps) {
     var spSrcB = { i: 1, o: 1 };
     /** @type {BandNum} */
     var spDstB = { i: 1, o: 1 };
-    /** @type {BandNum} */
-    var roomSrcB = { i: 0, o: 0 };
-    /** @type {BandNum} */
-    var roomDstB = { i: 0, o: 0 };
+    // github#186
+    var bandGone = { i: false, o: false };
+    var bandBorn = { i: false, o: false };
     /** @type {Record<string, number> | null} */
     var cellSrc = null;
     /** @type {Record<string, number> | null} */
@@ -4779,10 +4971,28 @@ function mountVaultGraph(root, data, deps) {
       var w = opts.from;
       if (!w) return fn();
       var sDim = state.dim, sSub = subOrder, sBand = bandLock, sGeom = geomLock, sMove = moveFrom;
+      var sCounts = counts;
       state.dim = w.dim; subOrder = w.subOrder; bandLock = w.bandLock; geomLock = w.geomLock;
+      if (folding) counts = w.counts;
       moveFrom = null; oldWorld = true;
       try { return fn(); }
-      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; oldWorld = false; }
+      finally {
+        state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom;
+        moveFrom = sMove; counts = sCounts; oldWorld = false;
+      }
+    };
+    /** @param {Plan | null} plan @returns {FoldPlan | null} */
+    var holdFold = function (plan) {
+      if (!plan) return null;
+      /** @type {FoldPlan} */
+      var held = { plan: plan, members: dict(), cells: dict(), seats: dict() };
+      plan.cells.forEach(function (c) {
+        c.list.forEach(function (id) {
+          held.members[id] = true; held.cells[id] = c.k;
+          if (seatsFrom[id]) held.seats[id] = seatsFrom[id];
+        });
+      });
+      return held;
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -4800,12 +5010,21 @@ function mountVaultGraph(root, data, deps) {
         finally { moveFrom = save; }
       })();
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
+      if (folding) {
+        foldA = holdFold(a); foldB = holdFold(b);
+      }
       if (moves.length) {
         splitHold = dict();
         Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
         Object.keys(aCells).forEach(function (g0) {
           if (splitHold[g0] === undefined) splitHold[g0] = aCells[g0] > 1;
         });
+      }
+      // github#186 -- a wedge splits or merges once, at the click
+      if (!opts.hand) {
+        cellHold = dict();
+        if (a) a.cells.forEach(function (c) { c.list.forEach(function (id) { if (!isMove[id]) cellHold[id] = c.k; }); });
+        if (b) b.cells.forEach(function (c) { c.list.forEach(function (id) { if (!isMove[id]) cellHold[id] = c.k; }); });
       }
       Object.keys(tglDir).forEach(function (g0) {
         var n0 = tglDir[g0] === "out" ? aCells[g0] : bCells[g0];
@@ -4827,11 +5046,56 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
-      ["i", "o"].forEach(function (k) {
-        if (bandSrc[k] === undefined && bandDst[k] !== undefined) bandSrc[k] = 1;
-      });
       if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
       if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
+      // github#186
+      bandGone = { i: bandSrc.i !== undefined && bandDst.i === undefined,
+                   o: bandSrc.o !== undefined && bandDst.o === undefined };
+      // github#186, design/0015 -- a timeline walk fills the disc in date order, not as a ring
+      var whole = !opts.hand && !rank;
+      bandBorn = { i: whole && bandSrc.i === undefined && bandDst.i !== undefined,
+                   o: whole && bandSrc.o === undefined && bandDst.o !== undefined };
+      ["i", "o"].forEach(function (k) {
+        // github#186 -- a whole ring grows from one row, or thins to one
+        if (bandSrc[k] === undefined && bandDst[k] !== undefined) { bandSrc[k] = 1; spSrcB[k] = spDstB[k]; return; }
+        if (bandGone[k]) { bandDst[k] = whole ? 1 : bandSrc[k]; spDstB[k] = spSrcB[k]; }
+      });
+      // github#186 -- every wedge empties or fills at one rate, over the window
+      if (whole && !opts.cross) {
+        var lapW = windowFor(Math.max(outs.length, ins.length)) + fadeLen;
+        /** @param {Plan | null} pl @param {{ i: boolean, o: boolean }} skip */
+        var byCell = function (pl, skip) {
+          if (!pl) return;
+          pl.cells.forEach(function (c) {
+            if (skip[c.inner ? "i" : "o"]) return;
+            var ids = c.list.filter(function (id) { return !isMove[id] && to[id] !== undefined; });
+            var n = ids.length;
+            // github#186 -- a small wedge fades slowly, so its rate stays even
+            var fadeC = Math.min(lapW, Math.max(fadeLen, lapW * 3 / Math.max(1, n)));
+            ids.forEach(function (id, i) {
+              // github#186 -- evenly through the wedge, so it thins as it narrows
+              delay[id] = n < 2 ? 0 : (lapW - fadeC) * ((i * 0.6180339887) % 1);
+              fadeOf[id] = fadeC;
+            });
+          });
+        };
+        byCell(a, bandGone);
+        byCell(b, bandBorn);
+        // github#186 -- a whole ring goes by date: the intro's order, or its reverse
+        ["i", "o"].forEach(function (k) {
+          var gone = k === "i" ? bandGone.i : bandGone.o;
+          var born = k === "i" ? bandBorn.i : bandBorn.o;
+          if (!gone && !born) return;
+          var ids = (gone ? outs : ins).filter(function (id) {
+            return !isMove[id] && (bandLock && bandLock[groupOf(id)] ? "i" : "o") === k;
+          });
+          ids.sort(function (x, y) { var d = (tlRank[x] || 0) - (tlRank[y] || 0); return gone ? -d : d; });
+          ids.forEach(function (id, i) {
+            delay[id] = ids.length < 2 ? 0 : (lapW - fadeLen) * i / (ids.length - 1);
+            fadeOf[id] = fadeLen; byDate[id] = true;
+          });
+        });
+      }
       /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
         if (!pl) return null;
@@ -4843,14 +5107,13 @@ function mountVaultGraph(root, data, deps) {
           keepAlpha = dict();
           graph.forEachNode(function (id) { keepAlpha[id] = alpha[id]; alpha[id] = alphaFn(id); });
         }
-        var keepI = bandOf("i").room, keepO = bandOf("o").room;
         var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap, keepHub = hubRow0;
-        var keepRampI = bandOf("i").ramp, keepRampO = bandOf("o").ramp, keepScale = sizeScale;
+        var keepScale = sizeScale;
         var keepPin = pinnedPlan, keepKeep = planKeep;
         // github#79
         var keepOv = ovCells;
-        var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
-        roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
+        var savedCell = cellNow, savedEdge = edgeNow;
+        cellNow = null; edgeNow = null;
         var keepTag = trace ? trace.tag : "";
         traceTag(alphaFn ? "endpoint-B" : "endpoint-A");
         outPos = ringsLayout(pl, true);
@@ -4861,15 +5124,20 @@ function mountVaultGraph(root, data, deps) {
         fitPos = outPos; fitVer = -1;
         /** @type {Record<string, number>} */
         var sizes = dict();
+        // github#186 -- the endpoint's own rank: A the source's, B the destination's
+        var keepEase = visEase;
+        var keepRatio = dotMeasureRatio;
+        dotMeasureRatio = alphaFn ? targetSizeRatio : sourceSizeRatio;
+        visEase = alphaFn ? 1 : 0;
         graph.forEachNode(function (id, at) {
           if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
         });
+        visEase = keepEase;
+        dotMeasureRatio = keepRatio;
         fitPos = null; fitVer = -1;
-        var got = { i: bandOf("i").room, o: bandOf("o").room, pos: outPos,
-                    cells: cellRoom, edges: edgeCap, sizes: sizes };
-        roomNow = saved; cellNow = savedCell; edgeNow = savedEdge;
-        bandOf("i").room = keepI; bandOf("o").room = keepO;
-        bandOf("i").ramp = keepRampI; bandOf("o").ramp = keepRampO; sizeScale = keepScale;
+        var got = { pos: outPos, cells: cellRoom, edges: edgeCap, sizes: sizes };
+        cellNow = savedCell; edgeNow = savedEdge;
+        sizeScale = keepScale;
         dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge; hubRow0 = keepHub;
         pinnedPlan = keepPin; planKeep = keepKeep;
         ovCells = keepOv;
@@ -4878,8 +5146,6 @@ function mountVaultGraph(root, data, deps) {
       };
       var rA = inWorld(function () { return roomOf(a, null); });
       var rB = roomOf(b, function (id) { return willShow(id) ? timeFactor(id) : 0; });
-      if (rA) roomSrcB = { i: rA.i || 0, o: rA.o || 0 };
-      if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
       cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
       edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
       // github#66
@@ -4954,7 +5220,6 @@ function mountVaultGraph(root, data, deps) {
     // github#86, design/0015 -- the hand keys every delay on angle; re-dealing a group's
     // github#86 -- by radius would light a seat the fill edge has not reached
     if (!opts.hand) (function () {
-      var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
       /** @param {string} id @param {boolean} out */
       var radiusOf = function (id, out) {
         var pt = out ? posSrc[id] : finalPos[id];
@@ -4966,14 +5231,18 @@ function mountVaultGraph(root, data, deps) {
         var set = (out ? outs : ins).filter(function (id) {
           return groupOf(id) === g0;
         });
-        if (!set.length) return;
+        if (!set.length || byDate[set[0]]) return;
         set.sort(function (p, q) {
           var d = radiusOf(p, out) - radiusOf(q, out);
           return out ? d : -d;
         });
         if (out) {
+          // github#186 -- a small wedge fades slowly, so its rate stays even
+          var fadeC = Math.min(span, Math.max(fadeLen, span * 3 / Math.max(1, set.length)));
+          var room = Math.max(1, span - fadeC);
           set.forEach(function (id, i) {
-            delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+            delay[id] = set.length < 2 ? 0 : room * i / (set.length - 1);
+            fadeOf[id] = fadeC;
           });
         } else {
           var base0 = set.map(function (id) { return delay[id] || 0; }).sort(function (x, y) { return x - y; });
@@ -4981,6 +5250,45 @@ function mountVaultGraph(root, data, deps) {
         }
       });
     })();
+    // github#186, design/0015
+    if (folding) {
+      [outs, ins].forEach(function (ids, direction) {
+        ids.sort(function (x, y) { var d = (tlRank[x] || 0) - (tlRank[y] || 0); return direction ? d : -d; });
+        var fade = span * FADE_FRAMES * TIME_SCALE / (windowFor(ids.length) + FADE_FRAMES * TIME_SCALE);
+        ids.forEach(function (id, index) {
+          delay[id] = ids.length < 2 ? 0 : (span - fade) * index / (ids.length - 1);
+          fadeOf[id] = fade;
+        });
+      });
+      handLap = 0;
+      foldSizes = sizeCap;
+      lastCascade.path = "parallel refresh";
+    }
+    /** @param {FoldPlan | null} held @param {number} amount @param {number} start @param {number} end @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
+    var packFold = function (held, amount, start, end, walk) {
+      if (!held || end - start < 1e-9) return {};
+      var savedKeep = planKeep, savedCell = cellHold, savedPin = pinnedPlan;
+      var savedArc = planArc;
+      planArc = end - start >= 2 * Math.PI - 1e-9 ? null : { from: start, to: end };
+      planKeep = function (id) { return !!held.members[id]; };
+      cellHold = held.cells; pinnedPlan = null;
+      var endpoint = held.plan;
+      /** @type {Record<string, number>} */
+      var rows = dict();
+      endpoint.cells.forEach(function (c) { rows[c.k] = 1 + (c.rows - 1) * amount; });
+      var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
+                     o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
+      try {
+        var planned = buildWedgePlan(true, foldWeightOf, function (c) { return rows[c.k] || 1; },
+          { i: endpoint.spInner, o: endpoint.sp, depth: depths });
+        var positions = planned ? walk(planned, held.seats) : null;
+        var out = dict();
+        if (positions) Object.keys(positions).forEach(function (id) {
+          if (held.members[id]) out[id] = positions[id];
+        });
+        return out;
+      } finally { planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin; planArc = savedArc; }
+    };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
     // github#78, design/0006
@@ -4999,6 +5307,15 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- the erase edge, in degrees from 12 o'clock, for the checks
       if (handLap) { lastCascade.handDeg = 360 * frame / handLap; lastCascade.handLap = handLap; }
       var ease = pr * pr * (3 - 2 * pr);
+      visEase = ease;
+      // github#186 -- links of departing notes go first, before their fans bundle
+      var qe = Math.min(1, pr / LEAVE_EDGE_BY);
+      leaveEdgeK = 1 - qe * qe * (3 - 2 * qe);
+      // github#186 -- the deferred fit lands with the notes, not after them
+      if (deferredAutoFit && !fitRode && pr >= FIT_RIDE_AT && camAtRest) {
+        fitRode = true;
+        fit(Math.max(120, (span - frame) * msPerFrame), deferredFitTo);
+      }
       // github#78
       if (barWalking) barWalkTick(ease);
       var busy = false;
@@ -5018,7 +5335,7 @@ function mountVaultGraph(root, data, deps) {
           if (frame < arriveAt[id] + fadeLen) busy = true;
           continue;
         }
-        var q = (frame - delay[id]) / fadeLen;
+        var q = (frame - delay[id]) / (fadeOf[id] || fadeLen);
         q = q < 0 ? 0 : q > 1 ? 1 : q;
         alpha[id] = from[id] + (to[id] - from[id]) * (q * q * (3 - 2 * q));
         if (q < 1) busy = true;
@@ -5037,13 +5354,7 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
-      /** @param {string} k */
-      var roomWalk = function (k) {
-        var sv = roomSrcB[k], dv = roomDstB[k];
-        if (!(sv > 1)) return dv;
-        if (!(dv > 1)) return sv;
-        return sv + (dv - sv) * ease;
-      };
+      // github#186, decisions/0002 -- a band emptying at one end holds the other end's lattice
       /** @param {string} k */
       var depthWalk = function (k) {
         var a2 = bandSrc[k], b2 = bandDst[k];
@@ -5052,7 +5363,14 @@ function mountVaultGraph(root, data, deps) {
         if (b2 === undefined) b2 = a2;
         return a2 + (b2 - a2) * ease;
       };
-      // github#44
+      // github#186 -- the walked thickness may never exceed the band's STATIC one
+      /** @param {string} k */
+      var thickLock = function (k) {
+        if (!geomLock) return Infinity;
+        return k === "i" ? (geomLock.rOuter - geomLock.r0) * INNER_FILL
+                         : geomLock.maxR - geomLock.rOuter;
+      };
+      // github#44, github#186
       /** @param {string} k */
       var thickAt = function (k) {
         var ds = bandSrc[k], dd = bandDst[k];
@@ -5060,20 +5378,22 @@ function mountVaultGraph(root, data, deps) {
         if (ds === undefined) ds = dd;
         if (dd === undefined) dd = ds;
         var ts = ds * spSrcB[k], td = dd * spDstB[k];
-        return ts + (td - ts) * ease;
+        var t = ts + (td - ts) * ease;
+        // github#186 -- the cap converges onto a legal rest, late
+        var lock = thickLock(k);
+        var e8 = Math.pow(ease, 8), f8 = Math.pow(1 - ease, 8);
+        var cap = lock + Math.max(0, ts - lock) * f8 + Math.max(0, td - lock) * e8;
+        return t > cap ? cap : t;
       };
+      // github#186 -- continuous; placeCell caps the row index
       /** @param {string} k */
       var spWalk = function (k) {
         var rows = depthWalk(k), T = thickAt(k);
         if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
         return T / rows;
       };
-      var spNow = {
-        i: spWalk("i"),
-        o: spWalk("o"),
-        depth: { i: depthWalk("i"), o: depthWalk("o") },
-      };
-      roomNow = { i: roomWalk("i"), o: roomWalk("o") };
+      var spNow = { i: spWalk("i"), o: spWalk("o"),
+                    depth: { i: depthWalk("i"), o: depthWalk("o") } };
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
         var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
@@ -5082,6 +5402,12 @@ function mountVaultGraph(root, data, deps) {
           fRamp = tglDir[g0] === "out"
             ? Math.max(0, Math.min(1, (1 - mvEdge - pr) / (1 - mvEdge)))
             : Math.max(0, Math.min(1, (pr - mvEdge) / (0.55 - mvEdge)));
+        } else if (tglFull[g0] > 1e-9) {
+          // github#186
+          var wLive = 0, wIds = tglIds[g0] || [];
+          for (var wi = 0; wi < wIds.length; wi++) wLive += weightOf(wIds[wi]);
+          fRamp = wLive / tglFull[g0];
+          if (fRamp > 1) fRamp = 1; else if (!(fRamp > 0)) fRamp = 0;
         }
         colWalk[g0] = { f: fRamp, n: tglN[g0] || 1 };
       });
@@ -5100,14 +5426,61 @@ function mountVaultGraph(root, data, deps) {
       var plan = null;
       /** @type {Record<string, Point> | null} */
       var targets = null;
-      if (opts.hand && opts.from) {
+      var pathResid = 0;
+      /** @param {Plan} plan @param {Record<string, { cell: string, at: number }>} walkSeats */
+      var walkPlan = function (plan, walkSeats) {
+        plan.cells.forEach(function (c) {
+          var slots = c.slots, lo = null;
+          for (var first = 0; first < slots.length;) {
+            var old = walkSeats[slots[first].id];
+            if (old && old.cell === c.k) { lo = old.at; first++; continue; }
+            var end = first + 1;
+            while (end < slots.length && (!walkSeats[slots[end].id] || walkSeats[slots[end].id].cell !== c.k)) end++;
+            var hi = end < slots.length ? walkSeats[slots[end].id].at : null;
+            for (var j = first; j < end; j++) {
+              var seat = slots[j], target = 2 * seat.row + (seat.row % 2 ? 1 - seat.u : seat.u);
+              var start = lo !== null && hi !== null ? lo + (hi - lo) * (j - first + 1) / (end - first + 1)
+                : lo !== null ? Math.max(lo, target) : hi !== null ? Math.min(hi, target) : target;
+              walkSeats[seat.id] = { cell: c.k, at: start };
+            }
+            first = end;
+          }
+        });
+        return ringsLayout(plan, true, function (c, sl) {
+          var at = 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u);
+          var before = walkSeats[sl.id];
+          var ezPath = reduced ? 1 : pr < 1 ? RADIAL_EASE : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
+          var now = !before || before.cell !== c.k
+            ? at : before.at + (at - before.at) * ezPath;
+          walkSeats[sl.id] = pathSeats[sl.id] = { cell: c.k, at: now };
+          var pitch = (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
+          pathResid = Math.max(pathResid, Math.abs(at - now) * UNIT * Math.max(pitch, sl.r * 2 * Math.PI));
+          var row = Math.floor(now / 2), along = now - 2 * row;
+          var tPath = Math.min(1, along), radial = Math.max(0, along - 1);
+          return Object.assign({}, sl, { row: row,
+            r: sl.r + (row + radial - sl.row) * pitch,
+            u: row % 2 ? 1 - tPath : tPath });
+        });
+      };
+      if (folding) {
+        cellNow = null; edgeNow = null; colWalk = null;
+        var outWeight = 0, inWeight = 0;
+        outs.forEach(function (id) { outWeight += foldWeightOf(id); });
+        ins.forEach(function (id) { inWeight += foldWeightOf(id); });
+        var split = 2 * Math.PI * outWeight / Math.max(1e-9, outWeight + inWeight);
+        // github#186, design/0015 -- both discs keep their full depth; only the arc moves
+        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, 1, 0, split, walkPlan); }) : {};
+        var oldFit = dotFit, oldEdges = edgeCap;
+        var newSeats = packFold(foldB, 1, split, 2 * Math.PI, walkPlan);
+        dotFit = Object.assign({}, oldFit, dotFit);
+        edgeCap = Object.assign({}, oldEdges, edgeCap);
+        targets = Object.assign({}, oldSeats, newSeats);
+      } else if (opts.hand && opts.from) {
         // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
         // github#86 -- old disc fades in place; a dot that has left takes its FINAL
         // github#86 -- seat outright and waits, dark, for the fill edge. No plan.
         var mf = moveFrom;
         colWalk = null; cellNow = null; edgeNow = null;
-        if (roomDstB.i > 1) bandOf("i").room = roomDstB.i;
-        if (roomDstB.o > 1) bandOf("o").room = roomDstB.o;
         /** @type {Record<string, Point>} */
         var seats = dict();
         for (var mi = 0; mi < moving.length; mi++) {
@@ -5131,16 +5504,20 @@ function mountVaultGraph(root, data, deps) {
           if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
         }
         traceTag("frame");
-        targets = plan ? ringsLayout(plan, true) : null;
+        targets = plan ? walkPlan(plan, seatsFrom) : null;
         traceTag("");
       }
       var ez = reduced ? 1
              : pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
-      var resid = 0;
+      var resid = pathResid;
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
+        if (plan || folding) {
+          graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
+          return;
+        }
         // github#41
         var h = Math.atan2(q.y, q.x);
         if ((alpha[id] || 0) < 0.05) {
@@ -5153,8 +5530,23 @@ function mountVaultGraph(root, data, deps) {
         var rNow = Math.hypot(x, y), rWant = Math.hypot(q.x, q.y);
         var gap = rWant - rNow;
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
-        var r = rNow + gap * ez;
-        graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
+        var move = gap * ez;
+        // github#186 -- the angle glides too: a serpentine flip is an arc
+        var hNow = rNow > 1e-6 ? Math.atan2(y, x) : h;
+        var dh = h - hNow;
+        if (dh > Math.PI) dh -= 2 * Math.PI; else if (dh < -Math.PI) dh += 2 * Math.PI;
+        var arc = dh * rWant;
+        if (arc < 0 ? -arc > resid : arc > resid) resid = arc < 0 ? -arc : arc;
+        var turn = arc * ez;
+        // github#186, decisions/0002 -- a row hop glides, capped per frame
+        if (pr < 1) {
+          var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
+          if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
+          if (lim > 0 && turn > lim) turn = lim; else if (lim > 0 && turn < -lim) turn = -lim;
+        }
+        var r = rNow + move;
+        var hh = rWant > 1e-6 ? hNow + turn / rWant : h;
+        graph.mergeNodeAttributes(id, { x: r * Math.cos(hh), y: r * Math.sin(hh) });
       });
       posVer++;
       if (pr >= 1) tailFrames++;
@@ -5375,11 +5767,101 @@ function mountVaultGraph(root, data, deps) {
     var targets = ringsLayout();
     traceTag("");
     if (!targets) { if (done) done(); return; }
-    if (animate) animateTo(targets, done);
-    else {
-      assignPositions(targets);
+    if (animate) animateTo(targets, function () {
+      takeRestDots();
       renderer.refresh({ skipIndexation: false });
       if (done) done();
+    });
+    else {
+      assignPositions(targets);
+      takeRestDots();
+      renderer.refresh({ skipIndexation: false });
+      if (done) done();
+    }
+  }
+
+  // github#186 -- a date range, the timeline or a hidden group filters
+  function filterOn() {
+    if (state.from !== null || state.to !== null || state.until !== null) return true;
+    var h = state.hidden[state.dim];
+    if (h) for (var g in h) if (h[g]) return true;
+    for (var k in state.hiddenSub) if (state.hiddenSub[k]) return true;
+    return false;
+  }
+  // github#186 -- every dot's size at the unfiltered rest: a filter's bound
+  /** @type {Record<string, number>} */
+  var restHiU = dict();
+  /** @type {Record<string, number>} */
+  var restCapU = dict();
+  /** @type {Record<string, number>} */
+  var restT = dict();
+  var restTaking = false;
+  var restVer = 0, restSig = "";
+  function takeRestDots() {
+    if (!renderer || cascadeRun) return;
+    var sig = state.dim + "#" + restVer;
+    var filtered = filterOn();
+    if (filtered && sig === restSig) return;
+    if (sig !== restSig) { restHiU = dict(); restCapU = dict(); restT = dict(); }
+    restTaking = true;
+    try {
+      if (filtered) unfilteredRest();
+      else graph.forEachNode(takeRest);
+      restSig = sig;
+    } finally { restTaking = false; }
+  }
+  /** @param {string} id @param {{ size?: number }} a */
+  function takeRest(id, a) {
+    var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    t = t > 1 ? 1 : t < 0 ? 0 : t;
+    restT[id] = t = Math.pow(t, DOT_RAMP_CURVE);
+    var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, floorPx());
+    restHiU[id] = hi / pxPerUnit;
+    if (v < lo + (hi - lo) * t - 1e-9) restCapU[id] = v / pxPerUnit; else delete restCapU[id];
+  }
+  // github#186
+  /** @param {string} id */
+  function restAt(id) {
+    var hi = restHiU[id] * pxPerUnit, lo = Math.min(hi, floorPx());
+    var v = lo + (hi - lo) * (restT[id] || 0), cap = restCapU[id];
+    return cap !== undefined && cap * pxPerUnit < v ? cap * pxPerUnit : v;
+  }
+  // github#186
+  function unfilteredRest() {
+    var sFrom = state.from, sTo = state.to, sUntil = state.until;
+    var sHid = state.hidden[state.dim], sSub = state.hiddenSub;
+    var sAlpha = alpha, sSrc = visSrc, sDst = visDst, sEase = visEase;
+    var sBand = BAND ? { i: Object.assign({}, BAND.i), o: Object.assign({}, BAND.o) } : null;
+    var sFit = dotFit, sCell = cellRoom, sEdge = edgeCap, sHub = hubRow0, sOv = ovCells;
+    var sMaxR = lastMaxR, sScale = sizeScale, sPin = pinnedPlan, sKeep = planKeep;
+    var sCellNow = cellNow, sEdgeNow = edgeNow, sFitPos = fitPos;
+    var sTrace = trace, sProbe = probe, sDbg = DBG.cells;
+    var sSeats = pathSeats;
+    try {
+      pathSeats = dict();
+      state.from = state.to = state.until = null;
+      seedHidden(); state.hiddenSub = dict();
+      alpha = dict();
+      graph.forEachNode(function (id) { alpha[id] = visible(id) ? 1 : 0; });
+      visSrc = visDst = dict(); visEase = 1;
+      cellNow = edgeNow = null; pinnedPlan = planKeep = null;
+      trace = null; probe = null;
+      var pos = ringsLayout(null, true);
+      if (!pos) return;
+      measureSizeScale();
+      fitPos = pos; fitVer = -1;
+      graph.forEachNode(function (id, a) { if (alpha[id] > 0) takeRest(id, a); });
+    } finally {
+      state.from = sFrom; state.to = sTo; state.until = sUntil;
+      if (sHid) state.hidden[state.dim] = sHid; else delete state.hidden[state.dim];
+      state.hiddenSub = sSub;
+      alpha = sAlpha; visSrc = sSrc; visDst = sDst; visEase = sEase;
+      if (sBand && BAND) { Object.assign(BAND.i, sBand.i); Object.assign(BAND.o, sBand.o); }
+      dotFit = sFit; cellRoom = sCell; edgeCap = sEdge; hubRow0 = sHub; ovCells = sOv;
+      lastMaxR = sMaxR; sizeScale = sScale; pinnedPlan = sPin; planKeep = sKeep;
+      cellNow = sCellNow; edgeNow = sEdgeNow; fitPos = sFitPos; fitVer = -1;
+      trace = sTrace; probe = sProbe; DBG.cells = sDbg;
+      pathSeats = sSeats;
     }
   }
 
@@ -5436,8 +5918,9 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a leaving note is in the disc being left only
     if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
+    if (isHidden(fileGroup(id, a))) return false;
     if (isHidden(groupOf(id))) return false;
-    var d = fileDirs(id, a);
+    var d = noteDirs(id, a);
     if (!d.length) {
       if (state.hiddenSub[fileGroup(id, a) + "/"]) return false;
     } else {
@@ -5879,14 +6362,51 @@ function mountVaultGraph(root, data, deps) {
   // github#13
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
+  // github#171
+  var DOT_REF_DISC_PX = 340;
+  function floorPx() {
+    var discPx = geomLock ? geomLock.maxR * UNIT * pxPerUnit : 0;
+    return DOT_MIN_PX * Math.max(1, discPx / DOT_REF_DISC_PX);
+  }
+  // github#186
+  var DOT_GROW_MAX = 3;
+  // github#202
+  var DOT_RAMP_CURVE = 0.5;
+  var FEW_IN_CELL = 3;
+  var DOT_COUNT_GAIN = 0.7, DOT_COUNT_MAX_PX = 7.5;
+  /** @type {number | null} */
+  var dotMeasureRatio = null;
+  // github#186, decisions/0017
   var DOT_MAX_SPREAD = DENSITY_MAX;
-  var DOT_ROOM_MAX = DENSITY_MAX;
+  var DOT_OVER_PITCH = DENSITY_MAX;
   var sizeScale = 1;
+  // github#186
+  var pxPerUnit = 1;
+
+  // github#186
+  function measureCountFloor() {
+    if (!filterOn()) return 0;
+    /** @type {Record<string, number>} */
+    var weights = dict();
+    graph.forEachNode(function (id) {
+      if (!visible(id)) return;
+      var key = noteOf(id);
+      weights[key] = Math.max(weights[key] || 0, timeFactor(id));
+    });
+    var n = 0;
+    for (var key in weights) n += weights[key];
+    var baseline = basisCount();
+    if (n >= baseline) return 0;
+    return Math.min(DOT_COUNT_MAX_PX, DOT_MIN_PX + DOT_COUNT_GAIN * Math.log2(baseline / Math.max(1, n)));
+  }
+  function countFloorPx() {
+    return countFloorFrom + (countFloorTo - countFloorFrom) * visEase;
+  }
 
   // github#77, design/0013
-  var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
+  var PREVIEW_R_PX = [0.35, 0.8, 1.6, 3.0, 5.4];
   var PREVIEW_W = 48;
-  var PREVIEW_H = 40;
+  var PREVIEW_H = 52;
   var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
   var PREVIEW_CX = (function () {
     var i, wide = 0;
@@ -5902,30 +6422,16 @@ function mountVaultGraph(root, data, deps) {
     return out;
   })();
 
+  // github#186, decisions/0017
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT * (bandOf("o").sp || 1), y: 0 });
-    var pitch = Math.hypot(b.x - a.x, b.y - a.y);
-    if (!(pitch > 0)) return sizeScale;
+    var b = renderer.graphToViewport({ x: 1000, y: 0 });
     var cam = renderer.getCamera().getState().ratio || 1;
-    pitch *= cam;
-    /** @param {number} units */
-    var rampFor = function (units) {
-      var bb = renderer.graphToViewport({ x: units, y: 0 });
-      var pit = Math.hypot(bb.x - a.x, bb.y - a.y) * cam;
-      var hi = DOT_OF_PITCH * pit;
-      var hiCap = DOT_OF_PITCH * UNIT * DOT_MAX_SPREAD * cam;
-      if (hi > hiCap) hi = hiCap;
-      var lo = Math.min(hi, DOT_MIN_PX * cam);
-      return { m: (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN),
-               b: lo - (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN) * NODE_MIN,
-               lo: lo, hi: hi };
-    };
-    var ro = rampFor(UNIT * (bandOf("o").sp || 1) * bandScale("o"));
-    var ri = rampFor(UNIT * (bandOf("i").sp || 1) * bandScale("i"));
-    bandOf("o").ramp = ro; bandOf("i").ramp = ri;
-    return ro.hi / NODE_MAX;
+    var per = Math.hypot(b.x - a.x, b.y - a.y) * cam / 1000;
+    if (!(per > 0)) return sizeScale;
+    pxPerUnit = per;
+    return DOT_OF_PITCH * Math.min(pitchUnits("o"), UNIT * DOT_MAX_SPREAD) * per / NODE_MAX;
   }
 
   // github#41, design/0011
@@ -5933,79 +6439,87 @@ function mountVaultGraph(root, data, deps) {
   function dotWhy(size, id) {
     var isIn = !!bandLock && !!bandLock[groupOf(id)];
     var bk = isIn ? "i" : "o";
-    var rp = bandOf(bk).ramp;
     var cwd = colWalk ? colWalk[groupOf(id)] : undefined;
     return {
       id: id, band: bk, size: size,
-      ramp: { m: rp.m, b: rp.b, lo: rp.lo }, rampV: rp.m * (size || 4) + rp.b,
-      bandRoom: bandOf(bk).room,
+      // github#186
+      ramp: { m: 1 / (NODE_MAX - NODE_MIN), b: 0, lo: 0 }, rampV: dotRamp(id),
+      bandRoom: pitchUnits(bk),
       cellRoom: cellRoom[id], colWalk: cwd ? cwd.f : null,
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
-      walking: { room: !!roomNow, cell: !!cellNow, edge: !!edgeNow },
-      out: dotPx(size, id),
+      walking: { room: false, cell: !!cellNow, edge: !!edgeNow },
+      out: dotPx(size, id), ceil: lastDotHi, floorPx: lastDotLo,
+      countFloorPx: countFloorPx(),
       fit: fitNow ? fitNow[id] : undefined
     };
   }
 
+  var lastDotHi = 0;
+  var lastDotLo = 0;
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
+    // github#186, design/0015
+    if (foldSizes && id !== undefined && foldSizes[id] !== undefined) {
+      var folded = foldSizes[id];
+      if (edgeCap[id] !== undefined) folded = Math.min(folded, edgeCap[id] * pxPerUnit);
+      lastDotHi = folded; lastDotLo = 0;
+      if (fitCap) {
+        if (fitVer !== posVer) measureFit();
+        var foldFit = fitNow ? fitNow[id] : undefined;
+        if (foldFit !== undefined && foldFit > 0) folded = Math.min(folded, FIT_SHARE * foldFit * pxPerUnit);
+      }
+      return folded;
+    }
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
-    var rp = bandOf(isIn ? "i" : "o").ramp;
-    var v = rp.m * (size || 4) + rp.b;
-    if (id !== undefined) {
-      var room = bandOf(isIn ? "i" : "o").room;
-      var mine = cellRoom[id];
-      if (colWalk) {
-        var cwd = colWalk[groupOf(id)];
-        if (cwd !== undefined) mine = (mine === undefined ? room : mine) * cwd.f;
-      }
-      if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
-      if (room !== undefined) room *= 0.92;
-      var pit = pitchUnits(isIn ? "i" : "o");
-      if (room !== undefined && pit > 1e-9) {
-        var f = room / pit;
-        if (f > DOT_ROOM_MAX) f = DOT_ROOM_MAX;
-        v *= f;
-      }
+    var pit = pitchUnits(isIn ? "i" : "o");
+    // github#186, decisions/0017
+    var mine = id !== undefined ? cellRoom[id] : undefined;
+    if (colWalk && id !== undefined) {
+      var cwd = colWalk[groupOf(id)];
+      if (cwd !== undefined) mine = (mine === undefined ? pit : mine) * cwd.f;
     }
-    // github#107 -- DOT_MIN_PX now floors below the room scale, not scaled by it
-    var lo = rp.lo || DOT_MIN_PX;
+    // github#186, decisions/0017
+    // github#186 -- the pitch cap is DOT_OVER_PITCH x the spread
+    var u = DOT_OVER_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD * DOT_OVER_PITCH);
+    if (mine !== undefined && mine > 0 && mine * DOT_CLEAR < u) u = mine * DOT_CLEAR;
+    var hi = DOT_OF_PITCH * u * pxPerUnit;
+    // github#202
+    if (isIn && geomLock) hi = Math.min(hi, HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT * pxPerUnit);
+    lastDotHi = hi;
+    // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
+    var cameraRatio = dotMeasureRatio !== null ? dotMeasureRatio : renderer ? renderer.getCamera().getState().ratio || 1 : 1;
+    var floor = floorPx();
+    var camLo = restTaking ? floor : floor * cameraRatio;
+    var lo = Math.min(hi, camLo);
+    lastDotLo = lo;
+    // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
+    var v = lo + (hi - lo) * (id !== undefined ? Math.pow(dotRamp(id), DOT_RAMP_CURVE) : 1);
     if (v < lo) v = lo;
+    // github#186 -- the rest was taken at ratio 1; its floor share follows
+    var rest = id !== undefined && !restTaking && restHiU[id] !== undefined
+      ? restAt(id) + (camLo - floor) * (1 - (restT[id] || 0)) : undefined;
+    // github#186 -- under a filter a dot keeps at least its resting size
+    if (rest !== undefined && v < rest && filterOn()) v = rest;
+    var countFloor = restTaking ? 0 : countFloorPx() * cameraRatio;
+    if (v < countFloor) v = countFloor;
     var capU = edgeCap[id];
-    if (capU !== undefined && capU > 0) {
-      var pitU = pitchUnits(isIn ? "i" : "o");
-      var hiU = DOT_OF_PITCH * pitU;
-      if (hiU > 1e-6) {
-        var capV = rp.m * NODE_MAX + rp.b;
-        var vMax = capV * (capU / hiU);
-        if (v > vMax) v = vMax;
-      }
-    }
+    if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
     // github#41, design/0011
     if (fitCap && id !== undefined) {
       if (fitVer !== posVer) measureFit();
       var nnU = fitNow ? fitNow[id] : undefined;
-      if (nnU !== undefined && nnU > 0) {
-        var pitF = pitchUnits(isIn ? "i" : "o");
-        var hiF = DOT_OF_PITCH * pitF;
-        if (hiF > 1e-6) {
-          var fitV = (rp.m * NODE_MAX + rp.b) * (FIT_SHARE * nnU / hiF);
-          if (v > fitV) v = fitV;
-        }
+      if (nnU !== undefined && nnU > 0 && v > FIT_SHARE * nnU * pxPerUnit) {
+        v = FIT_SHARE * nnU * pxPerUnit;
       }
     }
     // github#35
     if (isIn && geomLock && hubRow0[id]) {
       var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
-      var pitH = pitchUnits("i");
-      var hiH = DOT_OF_PITCH * pitH;
-      if (hiH > 1e-6) {
-        var hubCapV = rp.m * NODE_MAX + rp.b;
-        var hubVMax = hubCapV * (hubU / hiH);
-        if (v > hubVMax) v = hubVMax;
-      }
+      if (v > hubU * pxPerUnit) v = hubU * pxPerUnit;
     }
+    // github#186
+    if (rest !== undefined && v > Math.max(DOT_GROW_MAX * rest, countFloor)) v = Math.max(DOT_GROW_MAX * rest, countFloor);
     // github#66
     if (id !== undefined && cascadeRun && cascadeRun.sizeCap) {
       var scap = cascadeRun.sizeCap[id];
@@ -6167,7 +6681,7 @@ function mountVaultGraph(root, data, deps) {
         var r = nodeStyle(id, a);
         if (al < 0.999) {
           r.color = withAlpha(r.color, al);
-          r.size = (r.size || a.size) * (shrinkFade ? al : 0.45 + 0.55 * al);
+          r.size = (r.size || a.size) * (foldSizes ? 1 : shrinkFade ? al : 0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
         if (colWalk) {
@@ -6178,6 +6692,8 @@ function mountVaultGraph(root, data, deps) {
         }
         var base = a.size || 4;
         r.size = dotPx(base, id) * ((r.size === undefined ? base : r.size) / base);
+        if (foldSizes && edgeCap[id] !== undefined) r.size = Math.min(r.size, edgeCap[id] * pxPerUnit);
+        if (foldSizes && r.size === 0) r.hidden = true;
         if (isPinned(id)) {
           r.size = (r.size || a.size) * hubSizeMult();
           r.zIndex = 3;
@@ -6210,6 +6726,9 @@ function mountVaultGraph(root, data, deps) {
             r.zIndex = 0;
           }
         }
+        // github#186 -- a departing note's links go in the first third of the walk
+        if (departing && leaveEdgeK < 1 && (departing[x[0]] || departing[x[1]])) al *= leaveEdgeK;
+        if (al <= 0.004) { r.hidden = true; return r; }
         if (al < 0.999) r.color = withAlpha(r.color, al * al);
         return capEdge(r, a);
       }
@@ -6627,11 +7146,56 @@ function mountVaultGraph(root, data, deps) {
     renderer.refresh();
   }
 
+  // github#134, design/0019
   /** @param {string} id */
   function centerOn(id) {
     var d = renderer.getNodeDisplayData(id);
     if (!d) return;
-    renderer.getCamera().animate({ x: d.x, y: d.y, ratio: 0.22 }, { duration: 420 });
+    var camera = renderer.getCamera(), cam = camera.getState();
+    var dim = renderer.getDimensions(), pad = 24, radius = 0;
+    var left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    var nx0 = Infinity, nx1 = -Infinity, ny0 = Infinity, ny1 = -Infinity;
+    /** @type {Record<string, boolean>} */
+    var set = dict(), seen = dict();
+    /** @param {{x: number, y: number}} n @param {{x: number, y: number}} p */
+    function include(n, p) {
+      nx0 = Math.min(nx0, n.x); nx1 = Math.max(nx1, n.x);
+      ny0 = Math.min(ny0, n.y); ny1 = Math.max(ny1, n.y);
+      left = Math.min(left, p.x); right = Math.max(right, p.x);
+      top = Math.min(top, p.y); bottom = Math.max(bottom, p.y);
+    }
+    [id].concat(neighboursOf(id)).forEach(function (n) {
+      var nd = renderer.getNodeDisplayData(n);
+      if (!nd || nd.hidden || (alpha[n] || 0) <= 0.004) return;
+      set[n] = true;
+      include(nd, renderer.graphToViewport(graph.getNodeAttributes(n)));
+      radius = Math.max(radius, renderer.scaleSize(nd.size));
+    });
+    Object.keys(set).forEach(function (n) {
+      graph.forEachEdge(n, function (e, attrs, s, t) {
+        if (seen[e] || !set[s] || !set[t]) return;
+        seen[e] = true;
+        var geo = edgeCurveGeom(e, s, t);
+        if (!geo || !geo.k) return;
+        var ns = renderer.getNodeDisplayData(s), nt = renderer.getNodeDisplayData(t);
+        include({ x: (ns.x + nt.x) / 2 - (nt.y - ns.y) * geo.k,
+                  y: (ns.y + nt.y) / 2 + (nt.x - ns.x) * geo.k }, geo.cp);
+      });
+    });
+    var x = d.x, y = d.y, ratio = 0.22;
+    if (Number.isFinite(left)) {
+      var width = right - left, height = bottom - top;
+      x = (nx0 + nx1) / 2; y = (ny0 + ny1) / 2;
+      if (!renderer.getSetting("enableCameraPanning")) {
+        x = cam.x; y = cam.y;
+        width = 2 * Math.max(Math.abs(left - dim.width / 2), Math.abs(right - dim.width / 2));
+        height = 2 * Math.max(Math.abs(top - dim.height / 2), Math.abs(bottom - dim.height / 2));
+      }
+      ratio = Math.max(ratio, cam.ratio * Math.max(
+        (width + 2 * radius) / Math.max(1, dim.width - 2 * pad),
+        (height + 2 * radius) / Math.max(1, dim.height - 2 * pad)));
+    }
+    camera.animate({ x: x, y: y, ratio: ratio }, { duration: 420 });
   }
 
   /* ---------------------------------------------------------------- UI */
@@ -6774,6 +7338,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {string} only
    * @property {string} ctTitle
    * @property {string} ct
+   * @property {string} [mark]
    */
   /**
    * github#86, design/0015 -- ONE row template for every group row the legend draws
@@ -6788,8 +7353,16 @@ function mountVaultGraph(root, data, deps) {
       '<span class="' + o.swClass + '" title="' + o.swTitle + '" style="background:' + o.swFill + '"></span>' +
       '<span class="nm" title="' + esc(o.g) + '">' + esc(o.g) + '</span>' +
       o.only +
-      '<span class="ct"' + o.ctTitle + '>' + o.ct + '</span></button>' +
+      '<span class="ct"' + o.ctTitle + '>' + (o.mark || '') + o.ct + '</span></button>' +
       '</div>';
+  }
+
+  // github#203
+  /** @param {string} g @returns {boolean} */
+  function subTagsHidden(g) {
+    if (state.dim !== "tag" || !parentTagsOnly) return false;
+    for (var k in state.hiddenSub) if (state.hiddenSub[k] && k.indexOf(g + "/") === 0) return true;
+    return false;
   }
 
   function buildLegend() {
@@ -6935,7 +7508,11 @@ function mountVaultGraph(root, data, deps) {
                              : '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>')
                    : '<span class="only none" aria-hidden="true"></span>',
         // github#50, github#78
-        ctTitle: ctTitle, ct: w.inert ? String(w.counts[g]) : countText(g) });
+        ctTitle: ctTitle, ct: w.inert ? String(w.counts[g]) : countText(g),
+        // github#203
+        mark: !w.inert && vis && subTagsHidden(g)
+          ? '<span class="subhid" title="Some sub-tags of ' + esc(g) +
+            ' are hidden. Turn off Parent tags only to show them.">some sub-tags hidden</span>' : '' });
 
       if (open && vis && !w.inert) {
         var subs = subOrder[g];
@@ -7226,7 +7803,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011 -- the lock derivation on its own, so ringsIn
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
@@ -7235,6 +7812,10 @@ function mountVaultGraph(root, data, deps) {
     bandLock = dict();
     base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
     if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
+    // github#186 -- pooled tags keep their names, but share the cell's band
+    base.cells.forEach(function (c) {
+      if (c.g === MERGED) c.list.forEach(function (id) { bandLock[groupOf(id)] = bandLock[c.g]; });
+    });
     var bandTotal = { i: 0, o: 0 };
     base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
     var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
@@ -7257,7 +7838,7 @@ function mountVaultGraph(root, data, deps) {
     return base;
   }
 
-  // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- another dimension; a live rebuild retakes THOSE, from that
   // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
@@ -7308,15 +7889,16 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    moveFrom = null; splitHold = null;
+    dropStandIns();
+    clearHolds();
     pinnedPlan = null; planKeep = null;
-    roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+    cellNow = null; edgeNow = null;
     posSrc = null;
     var prevBand = bandLock, prevGeom = geomLock;
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49; github#72, decisions/0011
+      // github#49; github#72, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
       if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
@@ -7396,7 +7978,9 @@ function mountVaultGraph(root, data, deps) {
       }
       if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-      pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+      if (foldSizes) dropStandIns();
+      clearHolds();
+      pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
       posSrc = null;
       state.until = null;
@@ -7420,8 +8004,8 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
-    colWalk = null;
+    clearHolds();
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null; posSrc = null;
     state.until = null;
     timelineFrame(true);
   }
@@ -7443,7 +8027,8 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    clearHolds();
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
     posSrc = null;
 
@@ -7462,7 +8047,7 @@ function mountVaultGraph(root, data, deps) {
       totalMs: dur,
       onFrame: function (pr) { sweepTo(pr); }
     });
-    play = { raf: 0, guard: 0, viaCascade: true };
+    play = cascadeRun ? { raf: 0, guard: 0, viaCascade: true } : null;
   }
 
   /** @param {number} pr 0..1 through the timeline */
@@ -7542,6 +8127,12 @@ function mountVaultGraph(root, data, deps) {
       var b = /** @type {HTMLElement} */ (btns[i]);
       b.setAttribute("aria-pressed", b.getAttribute("data-dim") === state.dim ? "true" : "false");
     }
+    // github#203 -- the chip belongs to the tag view only
+    var chip = $("parents");
+    if (chip) {
+      chip.hidden = state.dim !== "tag";
+      chip.setAttribute("aria-pressed", parentTagsOnly ? "true" : "false");
+    }
   }
 
   function buildTools() {
@@ -7554,6 +8145,8 @@ function mountVaultGraph(root, data, deps) {
       if (t) setDim(t.getAttribute("data-dim") || "folder", true);
     });
     syncDimUI();
+    // github#203
+    if ($("parents")) $("parents").onclick = function () { setParentTagsOnly(!parentTagsOnly, true); };
 
     // github#131, design/0019 -- the two readings
     if ($("tabgroups")) $("tabgroups").onclick = function () { setReading("groups"); };
@@ -7580,17 +8173,18 @@ function mountVaultGraph(root, data, deps) {
     $("refresh").onclick = function () {
       if (onRefresh) { onRefresh(); return; }
       resetView();
+      hardRelayout(false);
       fit();
       playTimeline();
     };
     // github#4
-    if ($("reset")) $("reset").onclick = fit;
+    if ($("reset")) $("reset").onclick = function () { fit(); };
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     // github#170 -- storedPan follows every deliberate choice
     if ($("pan")) $("pan").onclick = function () { storedPan = !panEnabled; setPan(storedPan, true); };
     // github#79
-    if ($("ov")) $("ov").onclick = fit;
+    if ($("ov")) $("ov").onclick = function () { fit(); };
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
@@ -7601,6 +8195,8 @@ function mountVaultGraph(root, data, deps) {
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
     setSheet(sheetOpen, true);
     setBand(bandOpen, true);
+    // github#151 -- the third root flag, written at mount like the two above
+    ROOT.setAttribute("data-ov", ovOn ? "on" : "off");
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
@@ -7927,8 +8523,7 @@ function mountVaultGraph(root, data, deps) {
       if (d === state.dim) {
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
         if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
-        buildLegend();
-        cascade(null, { colToggle: true });
+        hardRelayout(true);
       }
       buildSettings();
     }
@@ -8098,7 +8693,7 @@ function mountVaultGraph(root, data, deps) {
   var FIT_RATIO = 0.954;
 
   // github#14
-  var camAtRest = true, fitting = false;
+  var camAtRest = true, fitting = false, fitSeq = 0;
 
   function fitRatio() {
     var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
@@ -8128,18 +8723,22 @@ function mountVaultGraph(root, data, deps) {
         && Math.abs((st.angle || 0) - to.angle) <= 1e-3;
   }
 
-  function fit() {
-    var to = fitTarget();
+  /** @param {number} [ms] @param {{ x: number, y: number, ratio: number, angle: number } | null} [at] */
+  function fit(ms, at) {
+    var to = at || fitTarget();
     fitting = true;
+    var seq = ++fitSeq;
     // github#170, design/0013 -- restore what pan is NOW, and re-ask once landed
     var landed = function () {
+      // github#186
+      if (seq !== fitSeq) return;
       fitting = false; camAtRest = true;
       renderer.setSetting("enableCameraPanning", panEnabled);
       syncPhonePan();
     };
     // github#4 -- the flight needs panning on whatever the toggle says
     if (!panEnabled) renderer.setSetting("enableCameraPanning", true);
-    renderer.getCamera().animate(to, { duration: 380 }, landed);
+    renderer.getCamera().animate(to, { duration: ms > 0 ? ms : 380 }, landed);
   }
 
   function zoomBy(dir) {
@@ -8636,7 +9235,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86, design/0015 -- the disc being LEFT, so the cascade can draw both
     /** @type {LeftDisc} */
     var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
-                 color: leftColors };
+                 color: leftColors, counts: Object.assign(dict(), counts) };
     var rings = geomLock;
     stashDimNav(state.dim);
     state.dim = next;
@@ -8649,8 +9248,9 @@ function mountVaultGraph(root, data, deps) {
     syncDimUI();
     if (n) {
       // github#86 -- fresh locks for the new dimension, positions untouched
-      moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
-      roomNow = null; cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
+      clearHolds();
+      pinnedPlan = null; planKeep = null;
+      cellNow = null; edgeNow = null; posSrc = null;
       bandLock = null; geomLock = null;
       // github#86 -- alpha is the cascade's to walk: a note this disc hides and
       // github#86 -- the next shows ARRIVES with the fill edge, not at the switch
@@ -8668,7 +9268,8 @@ function mountVaultGraph(root, data, deps) {
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(dropStandIns, { colToggle: true, hand: true, from: from });
+    if (n) cascade(dropStandIns, { colToggle: true, hand: true, fold: foldSwitch, from: from,
+      totalMs: foldSwitch ? TIMELINE_MS * TIME_SCALE : undefined });
     return state.dim;
   }
 
@@ -8785,6 +9386,32 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onRootInOrder) onRootInOrder(rootInOrder);
     return rootInOrder;
+  }
+
+  // github#203
+  /** @param {boolean} on @param {boolean} [persist] @param {boolean} [instant] */
+  function setParentTagsOnly(on, persist, instant) {
+    var next = !!on;
+    if (next === parentTagsOnly) return parentTagsOnly;
+    parentTagsOnly = next;
+    syncDimUI();
+    if (state.dim === "tag") {
+      var walk = !!(renderer && !instant && geomLock);
+      var rings = geomLock;
+      buildSubOrder();
+      if (walk) hardRelayout(false, true);
+      else {
+        hardRelayout(false, false);
+        keepRings(rings);
+        applyLayout(false);
+        applyLayout(false);
+      }
+      attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+      if (refreshSettingsPanel) refreshSettingsPanel();
+    }
+    if (persist && onParentTagsOnly) onParentTagsOnly(parentTagsOnly);
+    if (walk) cascade(null, { colToggle: true });
+    return parentTagsOnly;
   }
 
   // github#78, design/0006
@@ -10159,7 +10786,7 @@ function mountVaultGraph(root, data, deps) {
   /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
 
   function demoBusy() {
-    return !!(play || cascadeRun || anim || hoverRaf || hlRaf);
+    return !!(play || cascadeRun || anim || hoverRaf || hlRaf || fitting);
   }
 
   /** @param {string} spec a name prefix, or "#N" for the Nth biggest */
@@ -10507,6 +11134,16 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["dim", "folder"], act: "tags", why: "and back to folders" },
       { settle: true, act: "tags", why: "the same swap the other way round" },
 
+      // github#203
+      { click: true, target: ["dim", "tag"], act: "parenttags", why: "cut the disc by tag" },
+      { settle: true, act: "parenttags", why: "let the tag disc land" },
+      { click: true, target: ["id", "parents"], act: "parenttags", why: "Parent tags: every parent tag folds into one solid wedge" },
+      { settle: true, act: "parenttags", why: "the sub-tag slivers merge into their parents" },
+      { click: true, target: ["id", "parents"], act: "parenttags", why: "...and the sub-tags come back" },
+      { settle: true, act: "parenttags", why: "let the sub-wedges return" },
+      { click: true, target: ["dim", "folder"], act: "parenttags", why: "back to folders" },
+      { settle: true, act: "parenttags", why: "leave the folder disc" },
+
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
@@ -10796,7 +11433,7 @@ function mountVaultGraph(root, data, deps) {
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
   // github#72, design/0014
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile", "sort"];
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile", "sort", "parenttags"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -10910,7 +11547,7 @@ function mountVaultGraph(root, data, deps) {
     busy: demoBusy,
     busyWhy: function () {
       return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
-               hover: !!hoverRaf, highlight: !!hlRaf };
+               hover: !!hoverRaf, highlight: !!hlRaf, fit: fitting };
     },
     where: demoWhere,
     cursorAt: demoCursorAt,
@@ -11020,7 +11657,7 @@ function mountVaultGraph(root, data, deps) {
     return d;
   }
 
-  // github#72, design/0014, decisions/0006, decisions/0011
+  // github#72, design/0014, decisions/0006, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   /**
    * @param {VaultData} next
    * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
@@ -11091,7 +11728,7 @@ function mountVaultGraph(root, data, deps) {
 
     onData.forEach(function (h) { attempt(h.fn); });
 
-    // decisions/0011
+    // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
     var ringsDim = geomLock ? geomLock.dim : null;
     hardRelayout(false, true, true);
     // github#86 -- and back inside the rings it was switched into, same step
@@ -11232,14 +11869,15 @@ function mountVaultGraph(root, data, deps) {
                     setCountBars: function (v) { return setCountBars(v !== false, false); },
                     // github#164 -- instant, like setFolderOrder: the host is not watching
                     setRootInOrder: /** @param {boolean} v */ function (v) { return setRootInOrder(v, false, true); },
+                    // github#203
+                    setParentTagsOnly: /** @param {boolean} v */ function (v) { return setParentTagsOnly(v === true, false, true); },
                     // github#165
                     setDevTools: /** @param {boolean} v */ function (v) { return setDevTools(v === true, false); },
                     setWedgeGrid: /** @param {boolean} v */ function (v) { return wedgeDebug(v === true); },
                     setTimeScale: /** @param {number} v */ function (v) { return setTimeScale(v); },
                     applyHiddenDefaults: function () {
                       seedHidden();
-                      buildLegend();
-                      cascade(null, { colToggle: true });
+                      hardRelayout(true);
                     },
                     heatBuild: heatBuild,
                     // github#70 -- heatDateOf is the seam a day-contents list reads,
@@ -11276,7 +11914,9 @@ function mountVaultGraph(root, data, deps) {
                       return out;
                     },
                     checkFocusWeb: function () {
-                      var best = null, bd = -1;
+                      /** @type {string | null} */
+                      var best = null;
+                      var bd = -1;
                       graph.forEachNode(function (id) {
                         var d = renderer.getNodeDisplayData(id);
                         if (!d || d.hidden) return;
@@ -11285,6 +11925,8 @@ function mountVaultGraph(root, data, deps) {
                       var keepSel = state.selected, keepHov = state.hovered;
                       state.selected = best; state.hovered = null;
                       renderer.refresh({ skipIndexation: true }); renderer.render();
+                      // github#101 -- sample after a real composite, not just render()'s return
+                      function sample() {
                       var cv = renderer.getCanvases();
                       var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
                       var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
@@ -11355,6 +11997,12 @@ function mountVaultGraph(root, data, deps) {
                       state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
                       res.webOK = res.dimAtGaps === 0;
                       return res;
+                      }
+                      return new Promise(function (resolve) {
+                        WIN.requestAnimationFrame(function () {
+                          WIN.requestAnimationFrame(function () { resolve(sample()); });
+                        });
+                      });
                     },
                     debugDump: function () {
                       var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
@@ -11442,7 +12090,7 @@ function mountVaultGraph(root, data, deps) {
                                    timelineUntil: state.until,
                                    markDay: state.markDay, shown: pts.length,
                                    heatSource: state.heatSource, recent: state.recent },
-                        room: { i: r3n(bandOf("i").room), o: r3n(bandOf("o").room) },
+                        room: { i: r3n(pitchUnits("i")), o: r3n(pitchUnits("o")) },
                         minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
                                    spInner: r3(bandOf("i").sp),
@@ -11458,9 +12106,11 @@ function mountVaultGraph(root, data, deps) {
                                              maxR: r3(geomLock.maxR), rows: geomLock.rows,
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
-                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
-                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
+                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX, growMax: DOT_GROW_MAX,
+                                countGain: DOT_COUNT_GAIN, countMaxPx: DOT_COUNT_MAX_PX, countFloorPx: countFloorPx(),
+                                maxSpread: DOT_MAX_SPREAD,
+                                clear: DOT_CLEAR, overPitch: DOT_OVER_PITCH,
+                                m: r3(1 / (NODE_MAX - NODE_MIN)), b: 0, lo: 0 },
                       };
                     },
     };
@@ -11490,6 +12140,10 @@ function mountVaultGraph(root, data, deps) {
                     get lazyEdges() { return lazyEdges; },
                     isOrphan: isOrphan,
                     wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,
+                    walkSeats: function () { return Object.keys(pathSeats).map(function (id) {
+                      var seat = pathSeats[id];
+                      return { id: id, rank: basisRank(id), cell: seat.cell, at: seat.at };
+                    }); },
                     // github#165 -- where the key landed, in host coordinates
                     wedgeLegendBox: function () { return DBG.legendBox || null; },
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
@@ -11509,6 +12163,8 @@ function mountVaultGraph(root, data, deps) {
                     seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
+                    restDots: function () { var o = dict(); for (var k in restHiU) o[k] = restAt(k); return o; },
+                    forgetRest: function () { restVer++; restHiU = dict(); restCapU = dict(); restT = dict(); },
                     ringColors: ringColors,
                     colorOf: colorOf,
                     nodeColor: nodeColor,
@@ -11536,6 +12192,7 @@ function mountVaultGraph(root, data, deps) {
                     get unlinkedTintByFolder() { return unlinkedTintByFolder; },
                     get countBars() { return countBars; },
                     get rootInOrder() { return rootInOrder; },
+                    get parentTagsOnly() { return parentTagsOnly; },
                     get rootKey() { return rootKey; },
                     get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     get subTailRank() { return SUB_SLOTS - 1; },
@@ -11871,6 +12528,8 @@ function mountVaultGraph(root, data, deps) {
                     get hoverBusy() { return !!hoverRaf; },
                     // github#14
                     get camAtRest() { return camAtRest; },
+                    // github#111 -- so a test reads the page's own value instead of a copy
+                    get FIT_RATIO() { return FIT_RATIO; },
                     // github#82
                     get sheetOpen() { return sheetOpen; },
                     get bandOpen() { return bandOpen; },
@@ -11978,6 +12637,9 @@ function mountVaultGraph(root, data, deps) {
                     },
                     // github#86 -- the fill edge's lag behind the erase edge, in degrees
                     get handBlade() { return HAND_BLADE_DEG; },
+                    get foldSwitch() { return foldSwitch; },
+                    set foldSwitch(v) { foldSwitch = !!v; },
+                    get foldActive() { return !!foldSizes; },
                     // github#86 -- the fade behind either edge, in degrees
                     get handFade() { return HAND_FADE_DEG; },
                     set handFade(v) { HAND_FADE_DEG = Math.max(1, Math.min(180, +v || 1)); },
@@ -12047,6 +12709,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    clearHolds();
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (hoverRaf) { WIN.cancelAnimationFrame(hoverRaf); hoverRaf = 0; }

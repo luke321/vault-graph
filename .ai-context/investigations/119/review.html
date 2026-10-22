@@ -1,0 +1,301 @@
+<title>luke321/vault-graph-119-tag-tail-audit — stale reports and design gate</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+/* ==== Legion review theme — v1.0 (2026-09-23) ============================
+   Semi-dark by default, light when the viewer asks for it.
+   Every review page links or inlines THIS block and nothing else.
+   Components are prefixed rv- so a page's own CSS cannot collide. */
+
+:root {
+  color-scheme: dark;
+  --rv-bg:        #1f2026;  /* page ground, a violet-leaning grey — not black */
+  --rv-surface:   #26272e;  /* raised panels: gate table, figures */
+  --rv-surface-2: #2e2f38;  /* table header, code, hover */
+  --rv-line:      #3a3b46;
+  --rv-text:      #dcdce4;
+  --rv-muted:     #9a9bab;
+  --rv-accent:    #8b7cf6;  /* Obsidian's violet, one notch softer */
+  --rv-accent-ink:#17161f;
+  --rv-pass:      #5fbf8f;
+  --rv-warn:      #e0b050;
+  --rv-fail:      #e5686b;
+  --rv-info:      #6aa9e8;
+  --rv-pass-bg:   rgba(95,191,143,.13);
+  --rv-warn-bg:   rgba(224,176,80,.13);
+  --rv-fail-bg:   rgba(229,104,107,.14);
+  --rv-info-bg:   rgba(106,169,232,.13);
+
+  --rv-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --rv-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --rv-radius: 6px;
+  --rv-width: min(2560px, 100% - clamp(32px, 4vw, 96px)); /* fills the 1440p centre snap */
+  --rv-measure: 74ch;                      /* prose keeps a readable line */
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --rv-bg:#f5f5f8; --rv-surface:#ffffff; --rv-surface-2:#ececf2; --rv-line:#d9d9e3;
+    --rv-text:#23242b; --rv-muted:#5d5e6e; --rv-accent:#6552e0; --rv-accent-ink:#ffffff;
+    --rv-pass:#237a50; --rv-warn:#8e6210; --rv-fail:#b8353a; --rv-info:#2a6cb0;
+    --rv-pass-bg:rgba(35,122,80,.10); --rv-warn-bg:rgba(142,98,16,.10);
+    --rv-fail-bg:rgba(184,53,58,.10); --rv-info-bg:rgba(42,108,176,.10);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --rv-bg:#f5f5f8; --rv-surface:#ffffff; --rv-surface-2:#ececf2; --rv-line:#d9d9e3;
+  --rv-text:#23242b; --rv-muted:#5d5e6e; --rv-accent:#6552e0; --rv-accent-ink:#ffffff;
+  --rv-pass:#237a50; --rv-warn:#8e6210; --rv-fail:#b8353a; --rv-info:#2a6cb0;
+  --rv-pass-bg:rgba(35,122,80,.10); --rv-warn-bg:rgba(142,98,16,.10);
+  --rv-fail-bg:rgba(184,53,58,.10); --rv-info-bg:rgba(42,108,176,.10);
+}
+
+body {
+  background: var(--rv-bg);
+  color: var(--rv-text);
+  font: 400 15px/1.6 var(--rv-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.rv-page { width: var(--rv-width); margin-inline: auto; padding-block: 40px 72px; display: grid; gap: 40px; }
+/* Single-column grids must not grow to fit their widest child (a long code line, a wide table) —
+   without this, one long line widens the whole page and a phone shows the desktop layout, cut off. */
+.rv-page, .rv-section, .rv-head, .rv-verdict, .rv-figure { grid-template-columns: minmax(0, 1fr); }
+.rv-page * { min-width: 0; }
+.rv-page p, .rv-page li { max-width: var(--rv-measure); }
+.rv-page a { color: var(--rv-accent); text-underline-offset: 3px; }
+.rv-page a:focus-visible, .rv-page button:focus-visible { outline: 2px solid var(--rv-accent); outline-offset: 2px; border-radius: 3px; }
+.rv-page h1, .rv-page h2, .rv-page h3 { text-wrap: balance; margin: 0; line-height: 1.25; }
+.rv-page h1 { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+.rv-page h2 { font-size: 19px; font-weight: 600; }
+.rv-page h3 { font-size: 15px; font-weight: 600; }
+.rv-page code, .rv-mono { font-family: var(--rv-mono); font-size: .9em; }
+.rv-page :not(pre) > code { background: var(--rv-surface-2); padding: 1px 5px; border-radius: 4px; }
+.rv-section { display: grid; gap: 14px; }
+.rv-label { font: 500 11.5px/1 var(--rv-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--rv-muted); }
+
+/* Header: what, where, which state */
+.rv-head { display: grid; gap: 12px; padding-bottom: 24px; border-bottom: 1px solid var(--rv-line); }
+.rv-key { font: 500 14px/1 var(--rv-mono); }
+.rv-meta { display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--rv-muted); font-size: 13.5px; }
+.rv-meta b { color: var(--rv-text); font-weight: 500; }
+
+/* State pills — the one place semantic colour appears besides the gates */
+.rv-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font: 500 12.5px/1.4 var(--rv-sans); white-space: nowrap; }
+.rv-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.rv-pill.pass { color: var(--rv-pass); background: var(--rv-pass-bg); }
+.rv-pill.warn { color: var(--rv-warn); background: var(--rv-warn-bg); }
+.rv-pill.fail { color: var(--rv-fail); background: var(--rv-fail-bg); }
+.rv-pill.info { color: var(--rv-info); background: var(--rv-info-bg); }
+
+/* Verdict: the first thing read, one sentence, left stripe carries the state */
+.rv-verdict { display: grid; gap: 6px; padding: 16px 20px; background: var(--rv-surface);
+  border: 1px solid var(--rv-line); border-left: 4px solid var(--rv-pass); border-radius: var(--rv-radius); }
+.rv-verdict.warn { border-left-color: var(--rv-warn); }
+.rv-verdict.fail { border-left-color: var(--rv-fail); }
+.rv-verdict p { margin: 0; font-size: 16px; }
+
+/* Tables: gates, changes, anything tabular */
+.rv-table-wrap { overflow-x: auto; border: 1px solid var(--rv-line); border-radius: var(--rv-radius); background: var(--rv-surface); }
+.rv-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.rv-table th { text-align: left; font: 500 12px/1 var(--rv-sans); letter-spacing: .05em; text-transform: uppercase;
+  color: var(--rv-muted); background: var(--rv-surface-2); padding: 11px 14px; }
+.rv-table td { padding: 10px 14px; border-top: 1px solid var(--rv-line); vertical-align: top; }
+.rv-table td.num { text-align: right; font-family: var(--rv-mono); }
+.rv-add { color: var(--rv-pass); } .rv-del { color: var(--rv-fail); }
+
+/* Figures: screenshots use the full page width, never boxed beside text */
+/* The description ALWAYS sits below the shot, never beside it — one column, caption last. */
+.rv-figure { margin: 0; display: grid; gap: 8px; }
+.rv-figure > figcaption { order: 99; }
+.rv-figure > .rv-shot { border: 1px solid var(--rv-line); border-radius: var(--rv-radius); overflow: hidden; background: var(--rv-surface); }
+.rv-figure img { display: block; width: 100%; height: auto; }
+.rv-figure figcaption { color: var(--rv-muted); font-size: 13.5px; }
+/* Screenshot layouts — pick by the shot's shape, not by taste.
+   wide    : a whole app window or page      -> full width (default)
+   square  : a dialog, panel or square crop  -> capped, so it is not blown up
+   tall    : a phone or portrait capture     -> capped narrower still
+   compare : two shots side by side (before / after); stacks on a phone
+   tall-row: several phone captures in a row; wraps as the screen narrows */
+.rv-figure.square { max-width: min(880px, 100%); }
+.rv-figure.tall   { max-width: min(420px, 100%); }
+.rv-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.rv-compare .rv-figure figcaption { display: grid; gap: 6px; justify-items: start; }
+.rv-tag { font: 500 11.5px/1 var(--rv-sans); letter-spacing: .08em; text-transform: uppercase; padding: 4px 8px;
+  border-radius: 4px; background: var(--rv-surface-2); color: var(--rv-text); white-space: nowrap; }
+.rv-tag.before { color: var(--rv-fail); background: var(--rv-fail-bg); }
+.rv-tag.after  { color: var(--rv-pass); background: var(--rv-pass-bg); }
+.rv-tall-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+@media (max-width: 760px) { .rv-compare { grid-template-columns: 1fr; } }
+
+.rv-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 14px; }
+.rv-sheet .rv-figure figcaption { font-family: var(--rv-mono); font-size: 12px; }
+
+/* Open questions: numbered because he answers them by number */
+.rv-questions { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
+.rv-questions li::marker { color: var(--rv-accent); font-weight: 600; }
+
+.rv-foot { color: var(--rv-muted); font-size: 13px; border-top: 1px solid var(--rv-line); padding-top: 18px; }
+
+/* ==== Phone — tuned for iPhone 15 Pro (393 × 852 CSS px) =========
+   Safe areas (Dynamic Island, home bar) come from the page skeleton's :root padding.
+   16px text so iOS never zooms, 44px tap targets, nothing scrolls sideways
+   except a wide file table inside its own box. */
+html { -webkit-text-size-adjust: 100%; }
+.rv-page code, .rv-mono { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  body { font-size: 16px; line-height: 1.55; }
+  .rv-page { padding-block: 20px 48px; gap: 28px; }
+  .rv-page h1 { font-size: 22px; }
+  .rv-page h2 { font-size: 18px; }
+  .rv-head { padding-bottom: 18px; }
+  .rv-meta { display: grid; gap: 6px; font-size: 14px; }
+  .rv-meta .rv-pill { justify-self: start; }
+  .rv-verdict { padding: 14px 16px; }
+  .rv-verdict p { font-size: 16.5px; }
+  .rv-page a { display: inline-block; min-height: 44px; line-height: 44px; }
+  .rv-page p a, .rv-page li a, .rv-page td a { display: inline; min-height: 0; line-height: inherit; }
+
+  /* Gate-style tables become one card per row: label above value, no sideways scroll */
+  .rv-table.stack thead { display: none; }
+  .rv-table.stack, .rv-table.stack tbody, .rv-table.stack td { display: block; width: 100%; box-sizing: border-box; }
+  .rv-table.stack tr { box-sizing: border-box; }
+  .rv-table.stack tr { padding: 12px 14px; border-top: 1px solid var(--rv-line); display: grid; gap: 6px; }
+  .rv-table.stack tr:first-child { border-top: 0; }
+  .rv-table.stack td { padding: 0; border: 0; }
+  .rv-table.stack td:first-child { font-weight: 600; }
+  .rv-table.stack td[data-label]:not(:first-child)::before { content: attr(data-label); display: block;
+    font: 500 11px/1.4 var(--rv-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--rv-muted); }
+
+  .rv-table td, .rv-table th { padding: 9px 10px; }
+  .rv-sheet { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .rv-tall-row { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .rv-figure.tall { max-width: 100%; }
+  .rv-figure figcaption { font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+</style>
+
+<main class="rv-page">
+  <header class="rv-head">
+    <span class="rv-key"><a href="https://github.com/luke321/vault-graph/issues/119">#119</a> · Vault Graph</span>
+    <h1>luke321/vault-graph-119-tag-tail-audit — stale reports and design gate</h1>
+    <div class="rv-meta">
+      <span>Audit <b>#119</b></span>
+      <span>2026-10-03 · <code>e8995f1</code> versus pinned <code>1a5cee1</code></span>
+      <span class="rv-pill warn">Audit · design pending</span>
+    </div>
+  </header>
+
+  <div class="rv-verdict warn">
+    <span class="rv-label">Verdict</span>
+    <p>The small-tag problem remains in the planner; several old explanations are stale, and implementation needs two design decisions plus a shared baseline with #186.</p>
+  </div>
+
+  <section class="rv-section">
+    <h2>The proposed next step</h2>
+    <ul>
+      <li><strong>Problem:</strong> small tags still consume individual slices, making the inner ring hard to read.</li>
+      <li><strong>Change:</strong> test alphabetical bundles of small tags, preserving each tag's identity and controls.</li>
+      <li><strong>Proof:</strong> fewer boundaries, readable rows, every note accounted for, and hiding one tag still hides exactly its notes.</li>
+      <li><strong>Scope:</strong> an isolated prototype first. Folder layout, dot sizes, colours, animations and camera remain with their current owners.</li>
+      <li><strong>Risk:</strong> stable bundles can become sparse after filtering; regrouping would make tags move between named bundles.</li>
+      <li><strong>Decisions made for you:</strong> none. The recommendations below await your answer.</li>
+    </ul>
+    <p>The complete file-scoped proposal and reproducible method are in <a href="README.md">the audit and plan</a>. The raw results are in <a href="measurements.json">measurements.json</a>.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>Gates and limits</h2>
+    <div class="rv-table-wrap"><table class="rv-table stack">
+      <thead><tr><th>Check</th><th>Result</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr><td>Immutable-source audit</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">Both revisions executed; assertions include fixture/palette/planner equality and diagnostic controls.</td></tr>
+        <tr><td>Comment ratchet</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">350 / 350, no increase.</td></tr>
+        <tr><td>Direct TypeScript + ESLint</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">Engine, browser and exporter: zero diagnostics. Repository ESLint: 0 errors, 0 warnings. Audit linted with the tooling profile.</td></tr>
+        <tr><td>Normal npm lint wrapper</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">Permission blocker cleared. Normal command passes: zero errors/warnings, file coverage and both TS2322 negative controls.</td></tr>
+        <tr><td>Normal PII gate</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">Normal scanner passes including staged audit files: 256 files, 12 names, 7 patterns, all 20 negative controls caught. No workaround.</td></tr>
+        <tr><td>Source scope / network</td><td data-label="Result"><span class="rv-pill pass">Pass</span></td><td data-label="Evidence">333 CSS rules, 60 ids; network scan clean on 18 source files. No product build claimed.</td></tr>
+        <tr><td>Rendered checks / full suite</td><td data-label="Result"><span class="rv-pill warn">Not run</span></td><td data-label="Evidence">#186 retains browser priority. No headless fallback; full suite was not requested.</td></tr>
+        <tr><td>Code map / index</td><td data-label="Result">Regenerated last</td><td data-label="Evidence">See final handover for the check result.</td></tr>
+        <tr><td>Local commit</td><td data-label="Result"><span class="rv-pill pass">Permission restored</span></td><td data-label="Evidence">Normal staging succeeds. Audit pinned locally with Refs #119, without a closing trailer; see handover for the commit hash.</td></tr>
+      </tbody>
+    </table></div>
+    <p>No product interaction changed, so there are no screenshots or clips. This page has not been opened by the worker. Artifact publishing is unavailable in this session; the local review is the deliverable.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>The four reports</h2>
+    <div class="rv-table-wrap"><table class="rv-table stack">
+      <thead><tr><th>Report</th><th>What is stale</th><th>What remains</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://github.com/luke321/vault-graph/issues/119">#119 · tiny tag wedges</a></td><td data-label="What is stale">115 boundaries / 31%, the all-prefix fixture caveat, and the old band-room diagnosis.</td><td data-label="What remains">116 inner groups on both isolated planners; merging disabled. Buckets still need identity, sizing and filter-stability decisions.</td></tr>
+        <tr><td><a href="https://github.com/luke321/vault-graph/issues/118">#118 · colour collisions</a></td><td data-label="What is stale">20 ordinary tags assigned grey by sort position: fixed in develop by 7eeda819.</td><td data-label="What remains">Ten automatic hues, twelve tag groups per hue. The half-fix deliberately left collisions open.</td></tr>
+        <tr><td><a href="https://github.com/luke321/vault-graph/issues/132">#132 · filtered ring</a></td><td data-label="What is stale">Unscaled inner rails: 1063–2439 should be about 850–1731 on the issue's inputs.</td><td data-label="What remains">Historical evidence supports a pitch margin and sparse locked rings. Current dot-edge/slot verification is deferred; no closure claimed.</td></tr>
+        <tr><td><a href="https://github.com/luke321/vault-graph/issues/171">#171 · viewport dot size</a></td><td data-label="What is stale">The old function name and 1.43 px floor; both current pins use 1.5 px.</td><td data-label="What remains">Both extracted dot functions shrink a midpoint dot relative to its lattice as scale grows. The new rest-cache resize check asks a different question.</td></tr>
+      </tbody>
+    </table></div>
+    <p>#190's shader fix <code>2c978b9</code> is already in the #186 pin, but not in local develop. It is not duplicated here. #134 retains walk-camera framing.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>Measured now: isolated planner, same result on both pins</h2>
+    <div class="rv-table-wrap"><table class="rv-table stack">
+      <thead><tr><th>Quantity</th><th>Result</th><th>What it measures</th></tr></thead>
+      <tbody>
+        <tr><td>Groups / notes / rows</td><td data-label="Result">Inner: 116 / 244 / 5<br>Outer: 5 / 710 / 7</td><td data-label="What it measures">Flat generated tags, default joined orphans, unit weights, stable index rank.</td></tr>
+        <tr><td>Allocator inner gaps</td><td data-label="Result">93.476° · 25.97%</td><td data-label="What it measures">116 × 0.805827°, not painted empty area.</td></tr>
+        <tr><td>Radius-dependent seam function</td><td data-label="Result">162° · 45% cap</td><td data-label="What it measures">Sample at the reference radius; not a browser measurement or interchangeable with allocator gaps.</td></tr>
+        <tr><td>Mixed-name fixture</td><td data-label="Result">24 / 100 at three-character prefix</td><td data-label="What it measures">The fixture correction already exists; 75 tags have one note.</td></tr>
+        <tr><td>Anonymous merge control</td><td data-label="Result">100 tags pooled; 121 → 22 wedges</td><td data-label="What it measures">VM-only SMALL_GROUP=4. Also changes the unfiltered rings: maxR 23.820 → 20.998 lattice units. Not a free switch.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="rv-section">
+    <h2>Measured now: viewport dependence in the dot formula</h2>
+    <div class="rv-table-wrap"><table class="rv-table stack">
+      <thead><tr><th>Pixels per lattice unit</th><th>Diameter in lattice units</th><th>Interpretation</th></tr></thead>
+      <tbody>
+        <tr><td>11.78</td><td data-label="Diameter in lattice units">0.520192</td><td data-label="Interpretation">Midpoint-size dot at ratio 1, unit pitch; no active caps.</td></tr>
+        <tr><td>16.76</td><td data-label="Diameter in lattice units">0.482356</td><td data-label="Interpretation">Actual extracted dot functions; same result on both pins.</td></tr>
+        <tr><td>18.76</td><td data-label="Diameter in lattice units">0.472814</td><td data-label="Interpretation">Controlled numeric inputs, not shape-vault pixels.</td></tr>
+        <tr><td>27.72</td><td data-label="Diameter in lattice units">0.446970</td><td data-label="Interpretation">14.1% smaller relative to the lattice than the first reading.</td></tr>
+      </tbody>
+    </table></div>
+    <p>A diagnostic zero-floor control produces 0.392857 at every scale. That isolates the mechanism; it does not approve removing the legibility floor. #186 records the rejected dense-vault result.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>Historical evidence, not a rerun</h2>
+    <p>The committed September #186 recording data contains 121 tag wedges, 31 below 85% seam coverage, with a worst reading of 0.52. This was reanalysed from the pinned archive; it is not a claim about today's rendered page. The original #132 numbers reduce to a 293.04-unit centre margin after correcting its rails, identified as one pitch by that investigation.</p>
+    <p>The two pins diverge by 35 develop-only and 56 #186-only commits. Neither this review nor the active #186 branch is an integration verdict.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>Open questions · design gate</h2>
+    <ol class="rv-questions">
+      <li><strong>D-1: should bundles be presentation or real groups?</strong> Recommend presentation: real tags keep colours, rows, pins and hide/only controls; the shared wedge gets a range label. Real groups require new colours, visibility and saved settings, expanding #118's scope.</li>
+      <li><strong>D-2: should membership stay fixed during filtering?</strong> Recommend stable membership from the unfiltered dimension; recut only on a data rebuild. It preserves findability but permits sparse filtered bundles. Recutting after every filter improves fill and moves tags between names.</li>
+    </ol>
+    <p>Next implementation gate: approve the revised isolated prototype after answering these. No auto mode was requested. The implement-ticket skill explicitly requires a real plan approval before implementation.</p>
+  </section>
+
+  <section class="rv-section">
+    <h2>Concrete implementation sequence</h2>
+    <ol>
+      <li>After approval, prototype alphabetical ranges under this investigation directory; preserve real tag membership, special groups, nesting and existing bands.</li>
+      <li>Compare targets of two, three and four columns per band: 10, 15 and 20 notes at the measured five-row depth. Measure partial tails, deterministic labels and filter stability.</li>
+      <li>When #186 yields the shared code and an agreed baseline exists, re-pin, rerun and propose the tag-only cell/label mapping. Do not merge or cherry-pick #186 here.</li>
+      <li>Run focused headed checks and before/after measurements for identity, hide/only, dates, zero weights, row/seam coverage, and unchanged folder goldens. Coordinate locks and screen access; no full suite.</li>
+      <li>Record the accepted design and numbers, regenerate the code map last, review and commit locally.</li>
+    </ol>
+    <p>Review lenses: correctness, repository conventions, evidence/gates, simplification, and an adversarial read. Key corrections: distinguish empty legend rows from wedges, allocator gaps from drawn seams, historical runs from current results, and rest-cache correctness from viewport invariance.</p>
+  </section>
+
+  <footer class="rv-foot">#119 · audit and proposed plan only · local commit · no push, merge, issue closure, or completion notice.</footer>
+</main>

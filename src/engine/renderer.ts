@@ -542,14 +542,14 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private renderLabels(): void {
     const ctx = this.ctx.labels;
     const { labelSize, labelFont, labelWeight, labelColor } = this.settings;
+    ctx.fillStyle = labelColor;
+    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
     for (const id of this.forcedLabels) {
       const data = this.nodeData.get(id);
       if (!data || data.hidden || !data.label) continue;
       const { x, y } = this.framedGraphToViewport(data);
       const size = this.scaleSize(data.size);
       if (x < -X_LABEL_MARGIN || x > this.width + X_LABEL_MARGIN || y < -Y_LABEL_MARGIN || y > this.height + Y_LABEL_MARGIN) continue;
-      ctx.fillStyle = labelColor;
-      ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
       ctx.fillText(data.label, x + size + 3, y + labelSize / 3);
     }
   }

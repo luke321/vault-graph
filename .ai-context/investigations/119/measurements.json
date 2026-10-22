@@ -1,0 +1,446 @@
+{
+  "schema": 1,
+  "evidence": "Browser-free source execution and archived-data reanalysis; not a browser regression run.",
+  "refs": {
+    "develop": "e8995f1c72e32a139693699ab4c659943593a699",
+    "pack186": "1a5cee193797f3b2465bc90151990c7cc7581fcb"
+  },
+  "revisions": {
+    "develop": {
+      "sourceBlob": "d0602c09f67ef7791b9feb33567b75feda9636be",
+      "fixture": {
+        "generatorBlob": "9c3c55279964dda6b9db51788bb8a30026040686",
+        "notes": 954,
+        "declaredOrphans": 139,
+        "carriedTags": 120,
+        "groupsIncludingEmptyAndSpecial": 122,
+        "carriedSingletons": 75,
+        "carriedTailAtMost3": 100,
+        "prefix3": {
+          "grouped": 24,
+          "clusters": 5,
+          "total": 100
+        },
+        "prefix4": {
+          "grouped": 22,
+          "clusters": 4,
+          "total": 100
+        },
+        "defaultFiledGroupsAtMost3IncludingEmptyUnlinked": 101,
+        "defaultFiledSingletons": 75,
+        "alternateOrphansSeparate": {
+          "groupsAtMost3IncludingZero": 102,
+          "singletons": 67,
+          "nonemptyGroups": 112
+        }
+      },
+      "palette": {
+        "groups": 122,
+        "distinctBaseColours": 11,
+        "greyBaseColours": 2,
+        "slotCounts": {
+          "g11": 2,
+          "g1": 12,
+          "g2": 12,
+          "g3": 12,
+          "g4": 12,
+          "g5": 12,
+          "g6": 12,
+          "g7": 12,
+          "g8": 12,
+          "g9": 12,
+          "g10": 12
+        }
+      },
+      "dot": {
+        "context": "Extracted functions; synthetic midpoint-size dot, unit pitch, ratio 1, no active geometric/frame/rest caps. NOT a rendered fixture.",
+        "floorPx": 1.5,
+        "rows": [
+          {
+            "pixelsPerLatticeUnit": 11.78,
+            "radiusPx": 3.063929,
+            "diameterLatticeUnits": 0.520192
+          },
+          {
+            "pixelsPerLatticeUnit": 16.76,
+            "radiusPx": 4.042143,
+            "diameterLatticeUnits": 0.482356
+          },
+          {
+            "pixelsPerLatticeUnit": 18.76,
+            "radiusPx": 4.435,
+            "diameterLatticeUnits": 0.472814
+          },
+          {
+            "pixelsPerLatticeUnit": 27.72,
+            "radiusPx": 6.195,
+            "diameterLatticeUnits": 0.44697
+          }
+        ]
+      },
+      "planner": {
+        "context": "Exact extracted planner/takeGeom/seam functions; default joined orphan filing, flat generated tags, unit weights, stable index rank. No renderer, cascade, or ringsLayout; seam samples are reference-radius values, not rendered arc coverage.",
+        "bands": {
+          "i": {
+            "groups": 116,
+            "notes": 244,
+            "rows": 5,
+            "referenceRadiusGraphUnits": 1820.20664,
+            "pitchGraphUnits": 176.128,
+            "allocatorGapDegrees": 0.805827,
+            "allocatorGapTotalDegrees": 93.475951,
+            "seamAtReferenceRadiusDegrees": 162
+          },
+          "o": {
+            "groups": 5,
+            "notes": 710,
+            "rows": 7,
+            "referenceRadiusGraphUnits": 3651.2583,
+            "pitchGraphUnits": 160,
+            "allocatorGapDegrees": 0.401717,
+            "allocatorGapTotalDegrees": 2.008584,
+            "seamAtReferenceRadiusDegrees": 3.766095
+          }
+        },
+        "geometry": {
+          "r0": 8.220364,
+          "rOuter": 16.820364,
+          "maxR": 23.820364
+        },
+        "mergedGroups": 0
+      },
+      "controls": {
+        "context": "Counterfactual VM globals only; no product file changed and no proposed fix is approved.",
+        "twelveHueSlotsGreyGroups": 22,
+        "zeroFloorDiameters": [
+          0.392857,
+          0.392857,
+          0.392857,
+          0.392857
+        ],
+        "smallGroupFour": {
+          "context": "Exact extracted planner/takeGeom/seam functions; default joined orphan filing, flat generated tags, unit weights, stable index rank. No renderer, cascade, or ringsLayout; seam samples are reference-radius values, not rendered arc coverage.",
+          "bands": {
+            "i": {
+              "groups": 20,
+              "notes": 217,
+              "rows": 5,
+              "referenceRadiusGraphUnits": 1458.985976,
+              "pitchGraphUnits": 135.168,
+              "allocatorGapDegrees": 0.796227,
+              "allocatorGapTotalDegrees": 15.924531,
+              "seamAtReferenceRadiusDegrees": 31.849063
+            },
+            "o": {
+              "groups": 2,
+              "notes": 737,
+              "rows": 7,
+              "referenceRadiusGraphUnits": 3199.73247,
+              "pitchGraphUnits": 160,
+              "allocatorGapDegrees": 0.458405,
+              "allocatorGapTotalDegrees": 0.916809,
+              "seamAtReferenceRadiusDegrees": 1.719017
+            }
+          },
+          "geometry": {
+            "r0": 7.398328,
+            "rOuter": 13.998328,
+            "maxR": 20.998328
+          },
+          "mergedGroups": 100
+        }
+      },
+      "mechanisms": {
+        "smallGroup": 0,
+        "minSpanDegrees": 6,
+        "pinBelowTen": true,
+        "roomCost": true,
+        "planRoom": true,
+        "roomPool": true,
+        "innerScale": 0.8,
+        "innerFill": 0.8
+      },
+      "issue132Recalculation": {
+        "context": "Reinterprets the issue's ROUNDED 1063/2439 rails and 1438 last centre; not fresh geometry.",
+        "innerLow": 850.4,
+        "innerHigh": 1731.04,
+        "centreShortfall": 293.04
+      }
+    },
+    "pack186": {
+      "sourceBlob": "9fcbc98014caaeefd2a8f2406ca4af17ce74956a",
+      "fixture": {
+        "generatorBlob": "9c3c55279964dda6b9db51788bb8a30026040686",
+        "notes": 954,
+        "declaredOrphans": 139,
+        "carriedTags": 120,
+        "groupsIncludingEmptyAndSpecial": 122,
+        "carriedSingletons": 75,
+        "carriedTailAtMost3": 100,
+        "prefix3": {
+          "grouped": 24,
+          "clusters": 5,
+          "total": 100
+        },
+        "prefix4": {
+          "grouped": 22,
+          "clusters": 4,
+          "total": 100
+        },
+        "defaultFiledGroupsAtMost3IncludingEmptyUnlinked": 101,
+        "defaultFiledSingletons": 75,
+        "alternateOrphansSeparate": {
+          "groupsAtMost3IncludingZero": 102,
+          "singletons": 67,
+          "nonemptyGroups": 112
+        }
+      },
+      "palette": {
+        "groups": 122,
+        "distinctBaseColours": 11,
+        "greyBaseColours": 2,
+        "slotCounts": {
+          "g11": 2,
+          "g1": 12,
+          "g2": 12,
+          "g3": 12,
+          "g4": 12,
+          "g5": 12,
+          "g6": 12,
+          "g7": 12,
+          "g8": 12,
+          "g9": 12,
+          "g10": 12
+        }
+      },
+      "dot": {
+        "context": "Extracted functions; synthetic midpoint-size dot, unit pitch, ratio 1, no active geometric/frame/rest caps. NOT a rendered fixture.",
+        "floorPx": 1.5,
+        "rows": [
+          {
+            "pixelsPerLatticeUnit": 11.78,
+            "radiusPx": 3.063929,
+            "diameterLatticeUnits": 0.520192
+          },
+          {
+            "pixelsPerLatticeUnit": 16.76,
+            "radiusPx": 4.042143,
+            "diameterLatticeUnits": 0.482356
+          },
+          {
+            "pixelsPerLatticeUnit": 18.76,
+            "radiusPx": 4.435,
+            "diameterLatticeUnits": 0.472814
+          },
+          {
+            "pixelsPerLatticeUnit": 27.72,
+            "radiusPx": 6.195,
+            "diameterLatticeUnits": 0.44697
+          }
+        ]
+      },
+      "planner": {
+        "context": "Exact extracted planner/takeGeom/seam functions; default joined orphan filing, flat generated tags, unit weights, stable index rank. No renderer, cascade, or ringsLayout; seam samples are reference-radius values, not rendered arc coverage.",
+        "bands": {
+          "i": {
+            "groups": 116,
+            "notes": 244,
+            "rows": 5,
+            "referenceRadiusGraphUnits": 1820.20664,
+            "pitchGraphUnits": 176.128,
+            "allocatorGapDegrees": 0.805827,
+            "allocatorGapTotalDegrees": 93.475951,
+            "seamAtReferenceRadiusDegrees": 162
+          },
+          "o": {
+            "groups": 5,
+            "notes": 710,
+            "rows": 7,
+            "referenceRadiusGraphUnits": 3651.2583,
+            "pitchGraphUnits": 160,
+            "allocatorGapDegrees": 0.401717,
+            "allocatorGapTotalDegrees": 2.008584,
+            "seamAtReferenceRadiusDegrees": 3.766095
+          }
+        },
+        "geometry": {
+          "r0": 8.220364,
+          "rOuter": 16.820364,
+          "maxR": 23.820364
+        },
+        "mergedGroups": 0
+      },
+      "controls": {
+        "context": "Counterfactual VM globals only; no product file changed and no proposed fix is approved.",
+        "twelveHueSlotsGreyGroups": 22,
+        "zeroFloorDiameters": [
+          0.392857,
+          0.392857,
+          0.392857,
+          0.392857
+        ],
+        "smallGroupFour": {
+          "context": "Exact extracted planner/takeGeom/seam functions; default joined orphan filing, flat generated tags, unit weights, stable index rank. No renderer, cascade, or ringsLayout; seam samples are reference-radius values, not rendered arc coverage.",
+          "bands": {
+            "i": {
+              "groups": 20,
+              "notes": 217,
+              "rows": 5,
+              "referenceRadiusGraphUnits": 1458.985976,
+              "pitchGraphUnits": 135.168,
+              "allocatorGapDegrees": 0.796227,
+              "allocatorGapTotalDegrees": 15.924531,
+              "seamAtReferenceRadiusDegrees": 31.849063
+            },
+            "o": {
+              "groups": 2,
+              "notes": 737,
+              "rows": 7,
+              "referenceRadiusGraphUnits": 3199.73247,
+              "pitchGraphUnits": 160,
+              "allocatorGapDegrees": 0.458405,
+              "allocatorGapTotalDegrees": 0.916809,
+              "seamAtReferenceRadiusDegrees": 1.719017
+            }
+          },
+          "geometry": {
+            "r0": 7.398328,
+            "rOuter": 13.998328,
+            "maxR": 20.998328
+          },
+          "mergedGroups": 100
+        }
+      },
+      "mechanisms": {
+        "smallGroup": 0,
+        "minSpanDegrees": 6,
+        "pinBelowTen": true,
+        "roomCost": true,
+        "planRoom": false,
+        "roomPool": false,
+        "innerScale": 0.8,
+        "innerFill": 0.8
+      },
+      "issue132Recalculation": {
+        "context": "Reinterprets the issue's ROUNDED 1063/2439 rails and 1438 last centre; not fresh geometry.",
+        "innerLow": 850.4,
+        "innerHigh": 1731.04,
+        "centreShortfall": 293.04
+      }
+    }
+  },
+  "archivedPacking": {
+    "only03": {
+      "label": "186-pack-investigation - demo vault, only 03 - Resources",
+      "frames": 385,
+      "rest": {
+        "restA": {
+          "wedges": 17,
+          "median": 0.94,
+          "min": {
+            "g": "14 - Reading List",
+            "band": "i",
+            "arc": 3.32,
+            "cover": 0.68
+          },
+          "below85": 2
+        },
+        "restB": {
+          "wedges": 1,
+          "median": 0.97,
+          "min": {
+            "g": "03 - Resources",
+            "band": "i",
+            "arc": 357.12,
+            "cover": 0.97
+          },
+          "below85": 0
+        }
+      }
+    },
+    "hide03": {
+      "label": "186-pack-investigation - demo vault, hide 03 - Resources",
+      "frames": 385,
+      "rest": {
+        "restA": {
+          "wedges": 17,
+          "median": 0.94,
+          "min": {
+            "g": "14 - Reading List",
+            "band": "i",
+            "arc": 3.32,
+            "cover": 0.68
+          },
+          "below85": 2
+        },
+        "restB": {
+          "wedges": 16,
+          "median": 0.95,
+          "min": {
+            "g": "14 - Reading List",
+            "band": "i",
+            "arc": 4.02,
+            "cover": 0.55
+          },
+          "below85": 3
+        }
+      }
+    },
+    "show03": {
+      "label": "186-pack-investigation - demo vault, show 03 - Resources again",
+      "frames": 389,
+      "rest": {
+        "restA": {
+          "wedges": 16,
+          "median": 0.95,
+          "min": {
+            "g": "14 - Reading List",
+            "band": "i",
+            "arc": 4.02,
+            "cover": 0.55
+          },
+          "below85": 3
+        },
+        "restB": {
+          "wedges": 17,
+          "median": 0.94,
+          "min": {
+            "g": "14 - Reading List",
+            "band": "i",
+            "arc": 3.32,
+            "cover": 0.68
+          },
+          "below85": 2
+        }
+      }
+    },
+    "shapeInbox": {
+      "label": "186-pack-investigation - shape vault, tags, hide inbox",
+      "frames": 386,
+      "rest": {
+        "restA": {
+          "wedges": 121,
+          "median": 1,
+          "min": {
+            "g": "anchor-brief",
+            "band": "i",
+            "arc": 3.25,
+            "cover": 0.52
+          },
+          "below85": 31
+        },
+        "restB": {
+          "wedges": 120,
+          "median": 1,
+          "min": {
+            "g": "anchor-brief",
+            "band": "i",
+            "arc": 3.25,
+            "cover": 0.52
+          },
+          "below85": 31
+        }
+      }
+    }
+  }
+}

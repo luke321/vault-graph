@@ -22,3 +22,20 @@
 # Colleagues, family, anyone who appears in the vault:
 # Firstname
 # Firstname Lastname
+
+# TYPED ENTRIES (github#196). The rules that would name you -- your employer, your work
+# tracker, your vault -- live here for the same reason the names do. A line `kind: value`
+# adds a rule instead of a name; any kind other than these three is refused:
+#
+#   email: example.com     # someone@example.com is a hit
+#   jira: ABC              # ABC-123 is a hit (case-sensitive, word boundaries)
+#   vault: MyVault         # C:\MyVault or D:/MyVault is a hit
+#
+# Repeat a kind for more values. A list that declares no entry of some kind warns here and
+# FAILS in CI. CI reads the PII_NAMES repository secret instead of this file: the same
+# entries, comma-separated on one line, e.g.
+#
+#   Firstname,Firstname Lastname,email: example.com,jira: ABC,vault: MyVault
+#
+# Every loaded value is also planted into a synthetic line on every run, and has to be
+# caught by its own rule. A control that fails prints its kind and index, never the value.

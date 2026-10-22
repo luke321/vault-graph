@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -55,6 +56,8 @@ const check = (ok, label, detail) => {
 };
 
 let phase = await launch();
+// github#197
+onInterrupt(() => { try { phase.child.kill(); } catch {} });
 try {
   console.log("\n=== phase 1: open the graph, then background it ===");
   await phase.cdp.eval(

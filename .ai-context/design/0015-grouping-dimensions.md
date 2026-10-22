@@ -1,5 +1,41 @@
 # Grouping dimensions: folders, tags, and the filing
 
+## Fold-and-regrow prototype (github#186, 2026-09-25)
+
+The branch now defaults to folding the old dimension toward one row per ring and growing the
+new dimension outward. This replaces the clock sweep as the default; the sweep described below
+remains available for comparison through `__vg.foldSwitch = false` in the standalone debug API.
+`true` restores the fold. This is a prototype awaiting browser measurement and visual review.
+
+Both worlds share the cascade's clock and the locked ring boundaries. Departure occupies
+progress 0..0.65; arrival occupies 0.30..0.95, its last 15% easing onto the resting layout
+(`FOLD_LAND`), and the 5% left lets the glide cap catch up so the landing does not snap
+(measured 2026-09-25: step at the landing 0.23 → 0.12 of a pitch). The 0.35 overlap keeps the
+lit-dot sum at 26% of its start at the trough, where the first cut (0..0.6 and 0.4..1) fell to 11%. Each cell distributes its fades using the same deterministic interleave as
+the packing rework. A fade takes at least 0.18 of the whole transition and stretches up to the
+whole 0.6 phase for small cells. Both bands use the same phase progress.
+
+Source and destination cell membership are captured once. Each frame plans each participating
+world separately with its endpoint pitch and a depth walking between one row and its resting
+depth. The source also retains its own group counts, colours and band assignment. This costs
+up to two layout passes per frame, versus no frame planning for the clock sweep; performance
+on large vaults has not yet been measured. The existing row caps and radial movement limit
+apply, using each note's own world's pitch. The arriving plan converges to `finalPos` before
+the cascade settles.
+
+Dot sizes retain their measured resting ceiling during the fold and still obey the drawn-frame
+clearance cap when enabled. `clearHolds()` clears this temporary sizing state on cancellation
+as well as completion. Removing stand-ins also clears it, and hiding the tab during a fold
+takes the stand-ins home before rebuilding the resting view.
+
+The smoke checks exercise both directions, inward and outward motion, monotone fades, the
+resting fixed point, and tab-hidden interruption. The existing fill-edge check explicitly
+selects the retained clock sweep and restores the mode afterward. These checks have been
+added but **have not run successfully yet**: the sandboxed launch failed with `spawn EPERM`.
+TypeScript and ESLint checks were run directly; those are not evidence of visual correctness.
+
+---
+
 **Status** as-built · github#86, 2026-09-09 · asked for on Reddit: group the disc by **tag**
 instead of by folder, so a vault organised by tag gets a picture of itself too.
 
@@ -426,6 +462,47 @@ exactly as the folder list was on boot.
 pin reaches the tag dimension and every tag takes its automatic slot. The colour panel stays a
 folder panel and says which dimension owns it, rather than offering swatches that would appear
 to do nothing. Tag colours would be a `tagColors` map, and that is its own feature.
+
+## Parallel Refresh after the comparison review (2026-10-03, github#186)
+
+The requested transition is the leaving disc running Refresh backwards while the destination
+runs Refresh forwards in parallel. The fixed-angle radial fold below was rejected in the
+comparison review. Departure now follows reverse date order and arrival follows date order,
+with both running for the normal Refresh duration. Each world replans from its own live
+weights, membership, cells and locked geometry. The cell-local serpentine walker introduced
+in aa987d6 is shared with ordinary Refresh, rather than independently easing polar positions.
+Stand-ins keep the worlds independent until the destination converges; its notes then take
+their stand-ins' final positions. The clock-hand fallback is unchanged.
+
+The subsequent overlap review requires both worlds to share the disc, like toggling
+groups off and on. Their live weights divide one angular budget: source wedges shrink in
+the leading arc while destination wedges grow in the released trailing arc. This is still
+the chronological serpentine walk, with the ordinary pitch, seam and packing rules. Each
+partial arc clamps its open ends, and edge clearance caps the drawn dot radii even when
+nearest-neighbour fitting is disabled. Zero-width seats must stay hidden: the renderer
+otherwise gives a zero-sized node its default size. Both endpoint layouts remain unchanged.
+
+## Fold continuity after the visual reviews (2026-09-26, github#186, superseded)
+
+The folder/tag fold uses each world's captured endpoint seats. A note's radius moves toward
+its band's first row on departure and from that row on arrival; its endpoint angle stays
+fixed. Repacking a fractional top row had repeatedly spread a small number of notes across
+the whole wedge, producing the scalloped silhouette seen in the recordings. Fixed angles
+remove that cause and reach the exact final seats without a separate landing blend.
+
+Arrival starts at 5% of the shared clock and runs for 65%; departure runs over the first 65%.
+The remaining 30% lets the movement cap converge. Fading changes opacity without another
+radius multiplier on the fold; actual frame clearance and endpoint size limits remain in
+force. The departure folds from the positions captured at the switch, and each fold covers only its
+own disc's notes. The clock-hand fallback is unchanged. Filmed: the demo's middle keeps 54% of
+the resting colour (was 24%), the tag vault's 48% (was 18%); the numbers are in `invariants.md`.
+
+## Parent-tag display and filtering (github#203)
+
+The Parent tags only chip flattens layout paths, not filter paths. `fileDirs()` supplies
+the flattened display hierarchy; `noteDirs()` retains the original folder or tag hierarchy
+for `visible()`. Hiding a subtag, including a deeper descendant, therefore keeps the same
+notes excluded when the chip is toggled in either direction.
 
 ## Verify
 

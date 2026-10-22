@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, writeFileSync, copyFileSync, rmSync, statSync } 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
+import { admit, threads } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,8 @@ const stamp = now.getFullYear() + "-" + two(now.getMonth() + 1) + "-" + two(now.
 const OUT = resolve(arg("out", join(ROOT, "demo-obsidian-live-" + stamp + ".mp4")));
 const VT = "vault-graph-view";
 const ID = "vault-graph";
+// github#198
+const OWNER = "record-live.mjs [" + process.pid + "]";
 
 const NOTES = [
   { ring: "outer", path: "05 - Meeting Notes/2026-09-10 Live refresh demo.md",
@@ -220,6 +223,9 @@ async function settle(cdp, wantOrder, capMs, label, quietPolls = 4) {
 
 async function main() {
   const exe = findObsidian(), ffmpeg = findFfmpeg();
+  // github#198
+  await admit("record", OWNER);
+  const n = await threads("encode", OWNER);
   const scr = screen(MONITOR);
   const box = { x: scr.x + Math.max(0, Math.round((scr.w - WIDTH) / 2)), y: scr.y + Math.max(0, Math.round((scr.h - HEIGHT) / 2)),
                 w: Math.min(WIDTH, scr.w), h: Math.min(HEIGHT, scr.h) };
@@ -277,7 +283,8 @@ async function main() {
     await park();
     ff = spawn(ffmpeg, ["-hide_banner", "-loglevel", "warning", "-f", "gdigrab", "-framerate", String(FPS), "-draw_mouse", "1",
       "-offset_x", String(L), "-offset_y", String(T), "-video_size", rw + "x" + rh, "-i", "desktop",
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-y", OUT],
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+      ...(n ? ["-threads", String(n)] : []), "-y", OUT],
       { stdio: ["pipe", "inherit", "inherit"] });
     recStart = Date.now();
     log("ffmpeg pid " + ff.pid + ", recording");

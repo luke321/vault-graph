@@ -49,7 +49,7 @@ against a wedged transport; it is a poor bound for a check, for two reasons:
   the first 70 characters of the source, which for two rides built from the same template is
   the same string both times.
 - **10 s of silence on a 1.5 s ride is indistinguishable from a run that has stopped**, and a
-  smoke run holds `screen-left` while it is silent. Whoever is watching cannot tell a slow
+  smoke run holds its screen while it is silent. Whoever is watching cannot tell a slow
   check from a dead one, so the honest response is to wait — which is how github#179's check
   came to be described as hanging for eight minutes.
 

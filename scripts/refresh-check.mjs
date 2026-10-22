@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -77,6 +78,11 @@ const ORDER =
   "})()";
 
 const session = await launch();
+// github#197
+onInterrupt(() => {
+  try { session.child.kill(); } catch {}
+  try { rmSync(join(VAULT, PROBE), { force: true }); } catch {}
+});
 try {
   console.log("\n=== open the graph ===");
   await session.cdp.eval(

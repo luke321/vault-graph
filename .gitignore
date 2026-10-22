@@ -15,6 +15,7 @@ dist/
 # Generated demo vault -- a structural mirror of a real vault. Regenerate with
 # scripts/make-demo-vault.mjs; never commit one, since the generator is the artefact.
 demo-vault/
+mirror-vault/
 
 # The PII deny list itself. The whole point is that these names are not in a commit;
 # .pii-names.example explains the file and carries no names.
@@ -36,3 +37,6 @@ CLAUDE.local.md
 # the probe is a mutated copy of src/page.js and would read as a duplicate of the whole page.
 src/vg-contract-probe.js
 tsconfig.probe.json
+# github#156 -- the same two, for the exporter's probe against tsconfig.contracts-node.json.
+src/vg-exporter-probe.mjs
+tsconfig.exporter-probe.json

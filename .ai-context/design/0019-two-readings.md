@@ -3,6 +3,37 @@
 **Status** built · github#131 · concept measured 2026-09-08 as github#80, prototypes on
 `concept/sidebar-readings`, never merged
 
+## Walk framing (github#134)
+
+`centerOn()` now frames the selected note's visible neighbourhood, including edges between its
+neighbours. Search results, linked-note hops and trail backtracking share that landing. A hover
+does not choose the camera target. Hidden endpoints contribute no bounds.
+
+The old fixed ratio of 0.22 kept the selected dot central but discarded most of the web around
+it. Keeping that centre and merely zooming out also wastes the empty side of an asymmetric web.
+Instead, the camera lands at the centre of the neighbourhood's bounds. It retains the same
+420 ms flight and easing, with no second fit or correction at the end. A compact neighbourhood
+or isolated note still stops at 0.22; a large web can require a view as wide as the full disc.
+
+Bounds include the quadratic control points as well as the endpoints. This conservative hull
+contains every point of every lit curve, including curves between two neighbours. Normalized
+coordinates determine the camera centre; current viewport coordinates determine the ratio,
+scaled by the current camera ratio. The largest drawn node radius adds clearance on each side,
+then a 24 px inset keeps the landing off the canvas edge. The calculation therefore follows the
+actual renderer transform instead of duplicating its normalization and aspect correction.
+With panning disabled, the centre stays fixed and the bounds expand symmetrically around it.
+
+This frames the visible geometry when navigation is requested. It does not continually chase
+later filters, drags or resizes, nor promise to avoid every floating control or long text label.
+The graph positions, cascade and overview fit are unchanged.
+
+Measured in headed Chrome at a 960x960 window (656x693 graph), demo fixture, degree-125 note:
+off-canvas endpoints **118/126 → 0/126**; sampled lit curve points **10,801/16,830 (64.2%) → 0**.
+The regenerated fixture and current UI differ from the issue's original 67.7% sample. Both
+before and after here use the same build data and window. `scripts/probe-room.mjs` supplies the
+measurement and before/after screenshots; the smoke check measures whole dot radii and curves
+at square, wide and narrow viewports, including isolated notes, filters and locked panning.
+
 ## What shipped (github#131)
 
 Reading **A**, as measured. The groups block carries a two-tab strip — **Groups** and
