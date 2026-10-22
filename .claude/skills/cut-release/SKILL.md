@@ -111,7 +111,7 @@ only ever receives `develop`, so no release tag is an ancestor of `develop` --
 Sort the tags by creation date instead.
 
 ```bash
-PREV_TAG=$(git tag --sort=-creatordate | head -1)                  # NOT git describe -- see above
+PREV_TAG=$(git tag --sort=-creatordate --list "[0-9]*" | head -1)                  # NOT git describe -- see above
 echo "$PREV_TAG"                                                   # sanity-check it against `gh release list`
 git log --oneline --merges "$PREV_TAG"..HEAD                       # one line per body of work
 git log "$PREV_TAG"..HEAD --format=%s%n%b | grep -oE "(Closes|Refs) #[0-9]+" | sort | uniq -c

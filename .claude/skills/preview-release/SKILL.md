@@ -30,7 +30,7 @@ repo routinely carries local-only merges the remote hasn't seen yet (push is alw
 separate ask). Local tags only, same reasoning.
 
 ```bash
-PREV_TAG=$(git tag --sort=-creatordate | head -1)
+PREV_TAG=$(git tag --sort=-creatordate --list "[0-9]*" | head -1)
 git log --oneline --merges "$PREV_TAG"..develop
 git log "$PREV_TAG"..develop --format=%s%n%b | grep -oE "(Closes|Refs) #[0-9]+" | sort | uniq -c
 git diff --stat "$PREV_TAG"..develop -- src plugin
