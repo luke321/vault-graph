@@ -30,7 +30,7 @@ published tag breaks every link to it.
 
 ---
 
-## 2.10.0 — "Groundwork" — 2026-10-21
+## 2.10.0 — "Groundwork" — 2026-10-22
 
 **The layout engine underneath the disc was rebuilt to make room for what comes next, dots now
 use the room they are given, and the tag view can show just your top-level tags.**
