@@ -1078,6 +1078,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     }
 
     // github#205
+    let builtWith = this.plugin.settings.createdKeys;
     new Setting(containerEl)
       .setName(CREATED_KEYS_SETTING.name)
       .setDesc(CREATED_KEYS_SETTING.desc)
@@ -1085,7 +1086,11 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setPlaceholder(DEFAULT_CREATED_KEYS)
         .setValue(this.plugin.settings.createdKeys)
         .onChange(async (v) => { await this.setCreatedKeys(v, false); })
-        .inputEl.addEventListener("blur", () => { void this.plugin.rebuildViews(); }));
+        .inputEl.addEventListener("blur", () => {
+          if (this.plugin.settings.createdKeys === builtWith) return;
+          builtWith = this.plugin.settings.createdKeys;
+          void this.plugin.rebuildViews();
+        }));
 
     new Setting(containerEl).setName("View").setHeading();
     // github#71
