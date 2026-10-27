@@ -86,6 +86,7 @@ colours are reachable from the thing they colour.
 | **Include templates** | Notes under your template folders. |
 | **Flatten month folders** | Treat `2026-08` and its siblings as one folder rather than a subfolder each. |
 | **Count words** | Sizes each note by its length. The one setting that costs real I/O. |
+| **Created date properties** | Note properties read as a note's created date, first match wins, ignoring case. Default `created, date`; `created at`, `date created` and the like are always tried after them. An `updated` or `modified` property dates the last touch. |
 
 Colours and visibility repaint the open graph immediately. The other four rebuild it,
 because they change what is *in* it.
@@ -330,7 +331,7 @@ knowing them explains the output:
 - **Links resolve the way Obsidian resolves them** — basename, then alias, then full path —
   read from **both** body and frontmatter, so `person: "[[Ada Lovelace]]"` counts. Fenced
   code blocks are skipped so Dataview queries don't invent edges.
-- **`created` frontmatter drives the timeline and the heatmap**, falling back to `date`. A
+- **A created-date property drives the timeline and the heatmap** (`created`, then `date`, or the keys you name under *Created date properties*; ISO datetimes and `2024/03/05` read too). A
   note with neither is always present rather than stranded at one end of the timeline.
 - The daily-note `[[prev]] | [[next]]` nav line **does** count as links; `--no-nav` strips
   it.

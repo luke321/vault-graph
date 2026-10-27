@@ -8,6 +8,7 @@ import { GraphStore, Renderer } from "../src/engine/index";
 import { buildData } from "./build-data.mjs";
 // github#149 -- what the settings tab still needs of the shared policy
 import { isSkippedFile, paraDirs, paraFolder } from "../src/taxonomy.mjs";
+import { DEFAULT_CREATED_KEYS } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 // github#83, design/0016
@@ -60,6 +61,7 @@ function bareMap() {
  * @property {boolean} templates
  * @property {boolean} flatMonths
  * @property {boolean} words
+ * @property {string} createdKeys                       github#205 -- comma-separated frontmatter keys
  * @property {Record<string, string>} folderColors      folder name -> slot key ("g7")
  * @property {Record<string, string>} subfolderColors   "folder/sub" -> slot key
  * @property {Record<string, string>} tagColors         github#86 -- tag -> slot key
@@ -92,7 +94,7 @@ function bareMap() {
 
 /**
  * github#140 -- the only four settings buildData reads, per render
- * @typedef {Pick<Settings, "ghosts" | "templates" | "flatMonths" | "words">} BuildOptions
+ * @typedef {Pick<Settings, "ghosts" | "templates" | "flatMonths" | "words" | "createdKeys">} BuildOptions
  */
 
 /**
@@ -519,6 +521,7 @@ class VaultGraphView extends ItemView {
       templates: this.plugin.settings.templates,
       flatMonths: this.plugin.settings.flatMonths,
       words: this.plugin.settings.words,
+      createdKeys: this.plugin.settings.createdKeys,
     };
     this.rebuilding = true;
     try {
@@ -752,6 +755,8 @@ const DEFAULTS = {
   templates: false,
   flatMonths: false,
   words: true,
+  // github#205
+  createdKeys: DEFAULT_CREATED_KEYS,
   folderColors: {},
   subfolderColors: {},
   tagColors: {},
@@ -795,6 +800,16 @@ const FOLDER_ORDER_SETTING = {
         "reach the disc, and a spec that cannot be read falls back to Name. Size puts the " +
         "biggest folder first. A folder keeps its colour whichever you pick.",
   options: { name: "Name", explorer: "File explorer", size: "Size" },
+};
+
+/* github#205 -- the one build setting that is text, not a toggle */
+const CREATED_KEYS_SETTING = {
+  key: /** @type {const} */ ("createdKeys"),
+  name: "Created date properties",
+  desc: "Note properties (frontmatter) read as a note's created date, first match wins, ignoring case. " +
+        "Created at, date created and the like are always tried after these. Without one, the date comes " +
+        "from the file name, then the file stamp -- which a copied vault resets. An updated or modified " +
+        "property sets the last-touched date the same way.",
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -943,6 +958,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
     });
     return [
       ...BUILD_SETTINGS.map((s) => toggle(s, false)),
+      { name: CREATED_KEYS_SETTING.name, desc: CREATED_KEYS_SETTING.desc,
+        aliases: ["date", "created", "frontmatter", "yaml", "properties", "modified", "updated"],
+        control: { type: /** @type {"text"} */ ("text"), key: CREATED_KEYS_SETTING.key,
+                   defaultValue: DEFAULT_CREATED_KEYS, placeholder: DEFAULT_CREATED_KEYS } },
       { type: /** @type {"group"} */ ("group"), heading: "View",
         items: [
           // github#71
@@ -975,6 +994,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
   }
   /** @param {string} key @param {unknown} value */
   async setControlValue(key, value) {
+    // github#205
+    if (key === CREATED_KEYS_SETTING.key) { await this.setCreatedKeys(String(value)); return; }
     // github#71 -- the only non-boolean, settled before the !!value below
     if (key === FOLDER_ORDER_SETTING.key) {
       await this.setFolderOrder(String(value));
@@ -1001,6 +1022,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (def.host) { if (view) view.liveSettingChanged(); return; }
     const api = view && view.handle && view.handle.api;
     if (api && def.api && api[def.api]) api[def.api](v);
+  }
+
+  // github#205
+  /** @param {string} v @param {boolean} [rebuild] */
+  async setCreatedKeys(v, rebuild = true) {
+    this.plugin.settings.createdKeys = v.trim() ? v : DEFAULT_CREATED_KEYS;
+    await this.plugin.saveSettings();
+    if (rebuild) await this.plugin.rebuildViews();
   }
 
   // github#71
@@ -1047,6 +1076,16 @@ class VaultGraphSettingTab extends PluginSettingTab {
             await this.plugin.rebuildViews();
           }));
     }
+
+    // github#205
+    new Setting(containerEl)
+      .setName(CREATED_KEYS_SETTING.name)
+      .setDesc(CREATED_KEYS_SETTING.desc)
+      .addText((x) => x
+        .setPlaceholder(DEFAULT_CREATED_KEYS)
+        .setValue(this.plugin.settings.createdKeys)
+        .onChange(async (v) => { await this.setCreatedKeys(v, false); })
+        .inputEl.addEventListener("blur", () => { void this.plugin.rebuildViews(); }));
 
     new Setting(containerEl).setName("View").setHeading();
     // github#71

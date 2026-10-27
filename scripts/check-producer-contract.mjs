@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { ALIAS_DIVERGENCE, DATA, DATE_SOURCES, DIVERGENCES, NODE, STATS, shapeOf, validate }
   from "../src/contract.mjs";
-import { dateTally } from "../src/dates.mjs";
+import { dateTally, frontmatterDay } from "../src/dates.mjs";
 import { buildData } from "../plugin/build-data.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +53,11 @@ const NOTES = {
   "03 - Dailies/2026-09-20.md": "# a day\n",
   "Templates/Tpl.md": "# a template\n",
   "Root.md": "# at the vault root, two words over\n",
+  // github#205
+  "05 - Dates/Slash.md": "---\nCreated_At: 2024/03/05 10:30\nModified: 2024-04-06T09:00:00\n---\n# slashes\n",
+  "05 - Dates/Wiki.md": "---\nDate_Created: 2023-11-02 08:00\nupdated: 2024-1-9\n---\n# a datetime\n",
+  "05 - Dates/Bad.md": "---\ncreated: yesterday\nupdated: 2024-13-40\n---\n# neither is a day\n",
+  "05 - Dates/Custom.md": "---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
 };
 
 // github#149 -- what Obsidian's cache says, stated not derived
@@ -107,11 +112,12 @@ function runExporter(vault, out, extra) {
 /**
  * @param {string} vault
  * @param {boolean} flatMonths
+ * @param {string} [createdKeys]   github#205
  * @returns {Promise<Record<string, unknown>>}
  */
-async function runPlugin(vault, flatMonths) {
+async function runPlugin(vault, flatMonths, createdKeys) {
   const out = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (
-    await buildData(fakeHost(vault), { ghosts: true, templates: false, flatMonths, words: true },
+    await buildData(fakeHost(vault), { ghosts: true, templates: false, flatMonths, words: true, createdKeys },
                     FIXTURE_VERSION)));
   const nodes = /** @type {Record<string, unknown>[]} */ (out.nodes);
   if (!nodes.every((n) => n.words === 0)) sawDeferredZero = false;
@@ -243,6 +249,9 @@ try {
   // github#149, design/0020 -- the one shared rule with a parameter, both ways
   const exporterFlat = runExporter(vault, join(work, "flat.html"), ["--ghosts", "--flat-months"]);
   const pluginFlat = await runPlugin(vault, true);
+  // github#205 -- the created-date setting, both ways
+  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added"]);
+  const pluginKeys = await runPlugin(vault, false, "added");
 
   console.log("check-producer-contract: each producer against the contract");
   eq(validate(exporter, "exporter"), [], "the exporter satisfies the contract");
@@ -279,6 +288,7 @@ try {
   console.log("check-producer-contract: the two values against each other");
   compareValues(exporter, plugin, "");
   compareValues(exporterFlat, pluginFlat, " (--flat-months)");
+  compareValues(exporterKeys, pluginKeys, " (created keys)");
   /**
    * @param {Record<string, unknown>} exporter @param {Record<string, unknown>} plugin
    * @param {string} note
@@ -364,6 +374,27 @@ try {
        "github#97 -- a `type:` naming an Object.prototype member stays a string");
     eq(ex["04 - Notes/Proto.md"].type, "constructor",
        "and it is the name that was written, not what the prototype holds under it");
+  }
+
+  console.log("check-producer-contract: which property dates a note (github#205)");
+  {
+    /** @param {Record<string, unknown>} d */
+    const byId = (d) => Object.fromEntries(
+      /** @type {Record<string, unknown>[]} */ (d.nodes).map((n) => [String(n.id), n]));
+    const ex = byId(exporter), keys = byId(exporterKeys);
+    const stamp = "2026-09-20";
+    eq(ex["05 - Dates/Slash.md"].created, "2024-03-05", "created_at, slashes and a time are a day");
+    eq(ex["05 - Dates/Slash.md"].touched, "2024-04-06", "modified feeds touched, not the file stamp");
+    eq(ex["05 - Dates/Wiki.md"].created, "2023-11-02", "a date with a time is a day");
+    eq(frontmatterDay("[[2023-11-02]]"), "2023-11-02", "a wikilinked date is a day");
+    eq(frontmatterDay("2024-02-30"), "", "a day that does not exist is not one");
+    eq(ex["05 - Dates/Wiki.md"].touched, "2024-01-09", "an unpadded updated is a day");
+    eq([ex["05 - Dates/Bad.md"].created, ex["05 - Dates/Bad.md"].touched], [stamp, stamp],
+       "a property that is not a real day falls through to the stamp");
+    eq(ex["05 - Dates/Custom.md"].created, stamp, "a key the setting does not name is not read");
+    eq(keys["05 - Dates/Custom.md"].created, "2020-05-06", "a key the setting names is read");
+    eq(keys["05 - Dates/Slash.md"].created, "2024-03-05", "the variants are still tried after the named keys");
+    eq(ex["Root.md"].touched, stamp, "a note without updated keeps its file stamp");
   }
 
   console.log("check-producer-contract: every declared divergence still happens (github#149)");
