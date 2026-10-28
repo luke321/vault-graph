@@ -16,7 +16,8 @@ export function parseFrontmatter(raw) {
       (Array.isArray(fm[key]) ? fm[key] : (fm[key] = [])).push(unquote(li[1]));
       continue;
     }
-    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
+    // github#205
+    const kv = /^([A-Za-z0-9_][A-Za-z0-9_ -]*?)\s*:\s*(.*)$/.exec(line);
     if (!kv) continue;
     key = kv[1];
     const v = kv[2].trim();

@@ -57,7 +57,8 @@ const NOTES = {
   "05 - Dates/Slash.md": "---\nCreated_At: 2024/03/05 10:30\nModified: 2024-04-06T09:00:00\n---\n# slashes\n",
   "05 - Dates/Wiki.md": "---\nDate_Created: 2023-11-02 08:00\nupdated: 2024-1-9\n---\n# a datetime\n",
   "05 - Dates/Bad.md": "---\ncreated: yesterday\nupdated: 2024-13-40\n---\n# neither is a day\n",
-  "05 - Dates/Custom.md": "---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
+  "05 - Dates/Spaced.md": "---\ncreated at: 2020-02-03\nLast Modified: 2021-04-05\n---\n# keys with spaces\n",
+  "05 - Dates/Custom.md":"---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
 };
 
 // github#149 -- what Obsidian's cache says, stated not derived
@@ -154,7 +155,7 @@ function fakeHost(vault) {
     /** @type {Record<string, unknown>} */
     const fm = {};
     for (const line of m[1].split(/\r?\n/)) {
-      const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
+      const kv = /^([A-Za-z0-9_][A-Za-z0-9_ -]*?)\s*:\s*(.*)$/.exec(line);
       if (!kv) continue;
       const v = kv[2].trim();
       fm[kv[1]] = v.startsWith("[") && v.endsWith("]")
@@ -385,6 +386,8 @@ try {
     const stamp = "2026-09-20";
     eq(ex["05 - Dates/Slash.md"].created, "2024-03-05", "created_at, slashes and a time are a day");
     eq(ex["05 - Dates/Slash.md"].touched, "2024-04-06", "modified feeds touched, not the file stamp");
+    eq([ex["05 - Dates/Spaced.md"].created, ex["05 - Dates/Spaced.md"].touched], ["2020-02-03", "2021-04-05"],
+       "a property name with spaces is read by the exporter");
     eq(ex["05 - Dates/Wiki.md"].created, "2023-11-02", "a date with a time is a day");
     eq(frontmatterDay("[[2023-11-02]]"), "2023-11-02", "a wikilinked date is a day");
     eq(frontmatterDay("2024-02-30"), "", "a day that does not exist is not one");
