@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { parseFrontmatter } from "../src/note-source.mjs";
 
 import { ALIAS_DIVERGENCE, DATA, DATE_SOURCES, DIVERGENCES, NODE, STATS, shapeOf, validate }
   from "../src/contract.mjs";
@@ -61,12 +62,15 @@ const NOTES = {
   "05 - Dates/Spaced.md": "---\ncreated at: 2020-02-03\nLast Modified: 2021-04-05\n---\n# keys with spaces\n",
   "05 - Dates/Quoted.md": "---\n\"created at\": 2020-02-03\n'Last Modified': \"2020/02/03\" # an old note\n---\n# quoted keys and a comment\n",
   "05 - Dates/Accent.md": "---\nCréé: 2021-06-07\nupdated: 2021/08/09 # trailing comment\n---\n# a non-ASCII key\n",
+  "05 - Dates/Linky.md": "---\nrelated: [\"[[Beta|Issue #205]]\", '[[Alpha]]'] # a comment\nfollow: [\"[[Beta]], [[Alpha]]\"]\n'date d''ajout': 2020-09-10\n---\n# a hash inside a quote is not a comment\n",
   "05 - Dates/Custom.md":"---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
 };
 
 // github#149 -- what Obsidian's cache says, stated not derived
 const RESOLVED = {
   "01 - Projects/Alpha.md": { "02 - Areas/Beta.md": 1 },
+  // github#205
+  "05 - Dates/Linky.md": { "02 - Areas/Beta.md": 2, "01 - Projects/Alpha.md": 2 },
 };
 const UNRESOLVED = {
   "01 - Projects/Alpha.md": { "Nowhere": 1 },
@@ -245,8 +249,8 @@ try {
   const exporterFlat = runExporter(vault, join(work, "flat.html"), ["--ghosts", "--flat-months"]);
   const pluginFlat = await runPlugin(vault, true);
   // github#205 -- the created-date setting, both ways
-  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added, Créé"]);
-  const pluginKeys = await runPlugin(vault, false, "added, Créé");
+  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added, Créé, date d'ajout"]);
+  const pluginKeys = await runPlugin(vault, false, "added, Créé, date d'ajout");
 
   console.log("check-producer-contract: each producer against the contract");
   eq(validate(exporter, "exporter"), [], "the exporter satisfies the contract");
@@ -386,6 +390,10 @@ try {
        "a quoted key, and a quoted value with a trailing comment, decode before the date is read");
     eq(ex["05 - Dates/Accent.md"].touched, "2021-08-09", "an unquoted slash date with a trailing comment is a day");
     eq(keys["05 - Dates/Accent.md"].created, "2021-06-07", "a non-ASCII key the setting names is read");
+    eq(keys["05 - Dates/Linky.md"].created, "2020-09-10", "a single-quoted key's doubled apostrophe is one");
+    const linky = parseFrontmatter(NOTES["05 - Dates/Linky.md"]).fm;
+    eq(linky.related, ["[[Beta|Issue #205]]", "[[Alpha]]"], "a hash inside a quote is not a comment, in an inline array either");
+    eq(linky.follow, ["[[Beta]], [[Alpha]]"], "a comma inside a quote does not split an inline array");
     eq(ex["05 - Dates/Wiki.md"].created, "2023-11-02", "a date with a time is a day");
     eq(frontmatterDay("[[2023-11-02]]"), "2023-11-02", "a wikilinked date is a day");
     eq(frontmatterDay("2024-02-30"), "", "a day that does not exist is not one");
