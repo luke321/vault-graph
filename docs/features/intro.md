@@ -30,4 +30,4 @@ Commit `assets/features/intro.webp` and update `Last re-recorded` below in the s
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `2.10.0 — 2026-10-21` — 10.4 s at 1000x1000, encoded at 1000 px (2.43 MB) |
+| **Last re-recorded** | `2.10.1 — 2026-10-29` — 10.4 s at 1000x1000, encoded at 1000 px (2.47 MB) |

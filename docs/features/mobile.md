@@ -104,4 +104,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2.10.0 — 2026-10-21` — 21.3 s at 420x900, encoded at native width (1.41 MB) |
+| **Last re-recorded** | `2.10.1 — 2026-10-29` — 21.8 s at 420x900, encoded at native width (1.46 MB) |
