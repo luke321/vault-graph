@@ -16,7 +16,8 @@
     "globals": "^14.0.0",
     "obsidian": "^1.13.1",
     "typescript": "^5.4.5",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.67.0",
+    "yaml": "2.9.0"
   },
   "dependencies": {
     "esbuild": "^0.21.5"

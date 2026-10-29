@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 // decisions/0012
 import { buildSync } from "esbuild";
 // github#6
-import { localDay, resolveCreated, dateTally } from "./dates.mjs";
+import { createdKeyList, resolveCreated, resolveTouched, dateTally } from "./dates.mjs";
 // github#141
 import { canonicalDest, ghostKey, isRelativeDest, resolveAgainst } from "./links.mjs";
 // github#149 -- the policy this producer shares with plugin/build-data.mjs
@@ -124,6 +124,8 @@ const INCLUDE_TEMPLATES = flag("templates") || MIRROR_SETTINGS.templates === tru
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
 const FLAT_MONTHS = flag("flat-months") || MIRROR_SETTINGS.flatMonths === true;
 const STRIP_NAV = flag("no-nav");
+// github#205 -- the plugin's "Created date properties" setting, as a flag
+const CREATED_KEYS = createdKeyList(opt("created-keys", undefined));
 // github#71, decisions/0009 -- --folder-order overrides; absent, the page decides
 const SORTSPEC_ARG = opt("sortspec", "");
 // github#156 -- the page's own union; .includes() narrows nothing
@@ -244,7 +246,7 @@ for (const abs of files) {
   const { fm, body } = parseFrontmatter(raw);
   const name = basename(abs, ".md");
   let st = null; try { st = statSync(abs); } catch { st = null; }
-  const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs);
+  const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs, CREATED_KEYS);
   dates[dated.source]++;
 
   // github#149
@@ -262,7 +264,7 @@ for (const abs of files) {
     tags,
     // github#6
     created: dated.day,
-    touched: st ? localDay(st.mtimeMs) : "",
+    touched: resolveTouched(fm, st && st.mtimeMs),
     words: countWords(body),
     _links: mineLinks(body, fm, STRIP_NAV),
   };

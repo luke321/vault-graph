@@ -11,10 +11,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { parseFrontmatter } from "../src/note-source.mjs";
 
 import { ALIAS_DIVERGENCE, DATA, DATE_SOURCES, DIVERGENCES, NODE, STATS, shapeOf, validate }
   from "../src/contract.mjs";
-import { dateTally } from "../src/dates.mjs";
+import { dateTally, frontmatterDay } from "../src/dates.mjs";
 import { buildData } from "../plugin/build-data.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,11 +55,22 @@ const NOTES = {
   "03 - Dailies/2026-09-20.md": "# a day\n",
   "Templates/Tpl.md": "# a template\n",
   "Root.md": "# at the vault root, two words over\n",
+  // github#205
+  "05 - Dates/Slash.md": "---\nCreated_At: 2024/03/05 10:30\nModified: 2024-04-06T09:00:00\n---\n# slashes\n",
+  "05 - Dates/Wiki.md": "---\nDate_Created: 2023-11-02 08:00\nupdated: 2024-1-9\n---\n# a datetime\n",
+  "05 - Dates/Bad.md": "---\ncreated: yesterday\nupdated: 2024-13-40\n---\n# neither is a day\n",
+  "05 - Dates/Spaced.md": "---\ncreated at: 2020-02-03\nLast Modified: 2021-04-05\n---\n# keys with spaces\n",
+  "05 - Dates/Quoted.md": "---\n\"created at\": 2020-02-03\n'Last Modified': \"2020/02/03\" # an old note\n---\n# quoted keys and a comment\n",
+  "05 - Dates/Accent.md": "---\nCréé: 2021-06-07\nupdated: 2021/08/09 # trailing comment\n---\n# a non-ASCII key\n",
+  "05 - Dates/Linky.md": "---\nrelated: [\"[[Beta|Issue #205]]\", '[[Alpha]]'] # a comment\nfollow: [\"[[Beta]], [[Alpha]]\"]\n'date d''ajout': 2020-09-10\n---\n# a hash inside a quote is not a comment\n",
+  "05 - Dates/Custom.md":"---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
 };
 
 // github#149 -- what Obsidian's cache says, stated not derived
 const RESOLVED = {
   "01 - Projects/Alpha.md": { "02 - Areas/Beta.md": 1 },
+  // github#205
+  "05 - Dates/Linky.md": { "02 - Areas/Beta.md": 2, "01 - Projects/Alpha.md": 2 },
 };
 const UNRESOLVED = {
   "01 - Projects/Alpha.md": { "Nowhere": 1 },
@@ -107,11 +120,12 @@ function runExporter(vault, out, extra) {
 /**
  * @param {string} vault
  * @param {boolean} flatMonths
+ * @param {string} [createdKeys]   github#205
  * @returns {Promise<Record<string, unknown>>}
  */
-async function runPlugin(vault, flatMonths) {
+async function runPlugin(vault, flatMonths, createdKeys) {
   const out = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (
-    await buildData(fakeHost(vault), { ghosts: true, templates: false, flatMonths, words: true },
+    await buildData(fakeHost(vault), { ghosts: true, templates: false, flatMonths, words: true, createdKeys },
                     FIXTURE_VERSION)));
   const nodes = /** @type {Record<string, unknown>[]} */ (out.nodes);
   if (!nodes.every((n) => n.words === 0)) sawDeferredZero = false;
@@ -145,17 +159,8 @@ function fakeHost(vault) {
     // github#149 -- Obsidian strips the BOM before parsing frontmatter
     const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(raw).replace(/^\uFEFF/, ""));
     if (!m) return {};
-    /** @type {Record<string, unknown>} */
-    const fm = {};
-    for (const line of m[1].split(/\r?\n/)) {
-      const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
-      if (!kv) continue;
-      const v = kv[2].trim();
-      fm[kv[1]] = v.startsWith("[") && v.endsWith("]")
-        ? v.slice(1, -1).split(",").map((x) => x.trim()).filter(Boolean)
-        : v;
-    }
-    return fm;
+    // github#205
+    try { const fm = parseYaml(m[1]); return fm && typeof fm === "object" ? fm : {}; } catch { return {}; }
   };
 
   const app = {
@@ -243,6 +248,9 @@ try {
   // github#149, design/0020 -- the one shared rule with a parameter, both ways
   const exporterFlat = runExporter(vault, join(work, "flat.html"), ["--ghosts", "--flat-months"]);
   const pluginFlat = await runPlugin(vault, true);
+  // github#205 -- the created-date setting, both ways
+  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added, Créé, date d'ajout"]);
+  const pluginKeys = await runPlugin(vault, false, "added, Créé, date d'ajout");
 
   console.log("check-producer-contract: each producer against the contract");
   eq(validate(exporter, "exporter"), [], "the exporter satisfies the contract");
@@ -279,6 +287,7 @@ try {
   console.log("check-producer-contract: the two values against each other");
   compareValues(exporter, plugin, "");
   compareValues(exporterFlat, pluginFlat, " (--flat-months)");
+  compareValues(exporterKeys, pluginKeys, " (created keys)");
   /**
    * @param {Record<string, unknown>} exporter @param {Record<string, unknown>} plugin
    * @param {string} note
@@ -364,6 +373,37 @@ try {
        "github#97 -- a `type:` naming an Object.prototype member stays a string");
     eq(ex["04 - Notes/Proto.md"].type, "constructor",
        "and it is the name that was written, not what the prototype holds under it");
+  }
+
+  console.log("check-producer-contract: which property dates a note (github#205)");
+  {
+    /** @param {Record<string, unknown>} d */
+    const byId = (d) => Object.fromEntries(
+      /** @type {Record<string, unknown>[]} */ (d.nodes).map((n) => [String(n.id), n]));
+    const ex = byId(exporter), keys = byId(exporterKeys);
+    const stamp = "2026-09-20";
+    eq(ex["05 - Dates/Slash.md"].created, "2024-03-05", "created_at, slashes and a time are a day");
+    eq(ex["05 - Dates/Slash.md"].touched, "2024-04-06", "modified feeds touched, not the file stamp");
+    eq([ex["05 - Dates/Spaced.md"].created, ex["05 - Dates/Spaced.md"].touched], ["2020-02-03", "2021-04-05"],
+       "a property name with spaces is read by the exporter");
+    eq([ex["05 - Dates/Quoted.md"].created, ex["05 - Dates/Quoted.md"].touched], ["2020-02-03", "2020-02-03"],
+       "a quoted key, and a quoted value with a trailing comment, decode before the date is read");
+    eq(ex["05 - Dates/Accent.md"].touched, "2021-08-09", "an unquoted slash date with a trailing comment is a day");
+    eq(keys["05 - Dates/Accent.md"].created, "2021-06-07", "a non-ASCII key the setting names is read");
+    eq(keys["05 - Dates/Linky.md"].created, "2020-09-10", "a single-quoted key's doubled apostrophe is one");
+    const linky = parseFrontmatter(NOTES["05 - Dates/Linky.md"]).fm;
+    eq(linky.related, ["[[Beta|Issue #205]]", "[[Alpha]]"], "a hash inside a quote is not a comment, in an inline array either");
+    eq(linky.follow, ["[[Beta]], [[Alpha]]"], "a comma inside a quote does not split an inline array");
+    eq(ex["05 - Dates/Wiki.md"].created, "2023-11-02", "a date with a time is a day");
+    eq(frontmatterDay("[[2023-11-02]]"), "2023-11-02", "a wikilinked date is a day");
+    eq(frontmatterDay("2024-02-30"), "", "a day that does not exist is not one");
+    eq(ex["05 - Dates/Wiki.md"].touched, "2024-01-09", "an unpadded updated is a day");
+    eq([ex["05 - Dates/Bad.md"].created, ex["05 - Dates/Bad.md"].touched], [stamp, stamp],
+       "a property that is not a real day falls through to the stamp");
+    eq(ex["05 - Dates/Custom.md"].created, stamp, "a key the setting does not name is not read");
+    eq(keys["05 - Dates/Custom.md"].created, "2020-05-06", "a key the setting names is read");
+    eq(keys["05 - Dates/Slash.md"].created, "2024-03-05", "the variants are still tried after the named keys");
+    eq(ex["Root.md"].touched, stamp, "a note without updated keeps its file stamp");
   }
 
   console.log("check-producer-contract: every declared divergence still happens (github#149)");

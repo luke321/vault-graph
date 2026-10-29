@@ -44,15 +44,76 @@ export function stampDay(ctimeMs, mtimeMs) {
   return pick ? localDay(pick) : "";
 }
 
+// github#205
+const LOOSE_DAY = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:$|[T\s])/;
+
+/** @param {unknown} v @returns {string} "YYYY-MM-DD", or "" when it is not a real day */
+export function frontmatterDay(v) {
+  const strict = day10(v);
+  if (strict || typeof v !== "string") return strict;
+  const m = LOOSE_DAY.exec(v.trim().replace(/^\[\[|\]\]$/g, ""));
+  if (!m) return "";
+  const day = m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+  return isRealDay(day) ? day : "";
+}
+
+// github#205
+/** @param {string} key @returns {string} */
+function keyForm(key) {
+  return String(key).toLowerCase().replace(/[\s_-]+/g, " ").trim();
+}
+
+export const DEFAULT_CREATED_KEYS = "created, date";
+// github#205
+const CREATED_VARIANTS = ["created at", "date created", "creation date", "created on", "createdat"];
+const TOUCHED_KEYS = ["updated", "modified", "last modified", "last updated", "updated at",
+  "modified at", "date modified", "date updated", "updated on", "modified on"];
+
+/**
+ * github#205 -- the first listed key the note carries as a real day
+ * @param {Record<string, unknown>} fm
+ * @param {string[]} keys   already in keyForm
+ * @returns {string}
+ */
+function firstDay(fm, keys) {
+  if (!fm || typeof fm !== "object") return "";
+  /** @type {Map<string, unknown>} */
+  const have = new Map();
+  for (const k of Object.keys(fm)) { const f = keyForm(k); if (!have.has(f)) have.set(f, fm[k]); }
+  for (const k of keys) {
+    const day = have.has(k) ? frontmatterDay(have.get(k)) : "";
+    if (day) return day;
+  }
+  return "";
+}
+
+/** @param {unknown} list a comma-separated setting, or nothing @returns {string[]} */
+export function createdKeyList(list) {
+  const named = String(list == null ? DEFAULT_CREATED_KEYS : list)
+    .split(",").map(keyForm).filter(Boolean);
+  return Array.from(new Set(named.concat(CREATED_VARIANTS)));
+}
+
+/**
+ * github#205 -- a frontmatter updated/modified day, else the file's mtime
+ * @param {Record<string, unknown>} fm
+ * @param {number | null | undefined} mtimeMs
+ * @returns {string}
+ */
+export function resolveTouched(fm, mtimeMs) {
+  return firstDay(fm, TOUCHED_KEYS) || (mtimeMs ? localDay(mtimeMs) : "");
+}
+
 /**
  * @param {Record<string, unknown>} fm   the note's frontmatter, or {}
  * @param {string} basename
  * @param {number | null | undefined} ctimeMs
  * @param {number | null | undefined} mtimeMs
+ * @param {string[]} [keys]   github#205 -- createdKeyList(); absent, the default pair and its variants
  * @returns {{ day: string, source: DateSource }}
  */
-export function resolveCreated(fm, basename, ctimeMs, mtimeMs) {
-  const f = day10(fm && fm.created) || day10(fm && fm.date);
+export function resolveCreated(fm, basename, ctimeMs, mtimeMs, keys) {
+  const f = firstDay(fm, keys || createdKeyList());
   if (f) return { day: f, source: "frontmatter" };
   const n = nameDay(basename);
   if (n) return { day: n, source: "filename" };

@@ -1,4 +1,23 @@
-## 2026-10-16 — the picker's preview keeps up with the larger dots (`github#77`, `github#171`, `github#202`)
+﻿﻿## 2026-10-27 — the created date follows the property the vault uses (`github#205`)
+
+A cloned or copied vault resets every file stamp, so a note with no `created` or `date`
+property fell to the stamp and the whole timeline read as the day the vault arrived. The
+exporter and the plugin now share `createdKeyList()` in `src/dates.mjs`: the new *Created
+date properties* setting (`--created-keys` on the exporter, default `created, date`) is
+matched ignoring case, spaces, underscores and hyphens, and `created at`, `date created`,
+`creation date`, `created on` are always tried after it. A value reads as a day when it is an
+ISO date or datetime, `2024/03/05`, `2024-3-5` or a wikilinked day; an impossible day falls
+through. `updated` or `modified` (and their spellings) now feed `touched` ahead of the mtime.
+
+Measured: the producer contract gained a dated block (`Created_At: 2024/03/05 10:30`,
+`Modified`, `Date_Created` with a time, an unpadded `updated`, two non-days, and a key only the
+setting names) and the exporter and plugin agree node for node on it, with and without
+`--flat-months` and with a custom key. `scripts/layout-snapshots` unchanged: the golden check
+holds on all five fixtures (demo 954, tag 891, sortspec 287 notes among them) with no
+regeneration, and the dated tallies on the fixtures read as before (954 / 891 / 286 from
+frontmatter, 1 from the stamp). Full suite 554 s, every fixture green; `npm run lint` 0 and
+`check-comments` at its baseline of 350.
+# 2026-10-16 — the picker's preview keeps up with the larger dots (`github#77`, `github#171`, `github#202`)
 
 The pre-push suite on `5640517` went 548/549: "the picker draws the disc's own dot sizes" saw
 the demo disc draw 3.01 / **4.54** / 6.59 px against a preview scale topping out at 4.06 px. The
