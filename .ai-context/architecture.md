@@ -50,7 +50,7 @@ Host-independent rules that both producers import rather than port. **None of th
 anything**, because all four are bundled into the plugin: a `node:` import in any of them would
 reach `main.js`.
 
-- `dates.mjs` (github#6) decides a note's day: frontmatter, then filename, then file stamp.
+- `dates.mjs` (github#6, github#205) decides a note's day: a created-date property (the `createdKeys` setting, then its variants), then filename, then file stamp; an updated/modified property dates the last touch.
 - `links.mjs` (github#141) cleans a link target, resolves it against the note it was written in,
   and derives a ghost's id, key and label.
 - `taxonomy.mjs` (github#149) is everything else a producer decides about a note: its wedge and

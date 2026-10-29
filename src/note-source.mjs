@@ -16,13 +16,14 @@ export function parseFrontmatter(raw) {
       (Array.isArray(fm[key]) ? fm[key] : (fm[key] = [])).push(unquote(li[1]));
       continue;
     }
-    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
+    // github#205
+    const kv = KEY_LINE.exec(line);
     if (!kv) continue;
-    key = kv[1];
-    const v = kv[2].trim();
+    key = kv[1] != null ? decodeDouble(kv[1]) : kv[2] != null ? decodeSingle(kv[2]) : kv[3].trim();
+    const v = stripComment(kv[4]).trim();
     if (v === "") { fm[key] = []; continue; }
     if (v.startsWith("[") && v.endsWith("]")) {
-      fm[key] = v.slice(1, -1).split(",").map(unquote).filter(Boolean);
+      fm[key] = splitFlow(v.slice(1, -1)).map(unquote).filter(Boolean);
     } else {
       fm[key] = unquote(v);
     }
@@ -30,7 +31,63 @@ export function parseFrontmatter(raw) {
   // github#149
   return { fm, body: noteBody(raw) };
 }
-const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
+// github#205
+const KEY_LINE = /^(?:"((?:[^"\\]|\\.)+)"|'((?:[^']|'')+)'|([^\s:#"'[\]{},&*!|>%@`-][^:#]*?|-[^\s:#][^:#]*?))\s*:(?:\s+(.*)|$)/;
+// github#205
+const DOUBLE_ESC = { n: "\n", t: "\t", r: "\r", 0: "\0", '"': '"', "\\": "\\", "/": "/" };
+const decodeDouble = (s) => s.replace(/\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|(.))/g,
+  (all, x, u, c) => x || u ? String.fromCharCode(parseInt(x || u, 16)) : (c in DOUBLE_ESC ? DOUBLE_ESC[c] : all));
+const decodeSingle = (s) => s.replace(/''/g, "'");
+// github#205
+const opensQuote = (t, i) => {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(t[j])) j--;
+  return j < 0 || "[,{:".includes(t[j]);
+};
+// github#205
+/** @param {string} t @returns {number} where the value ends: a hash after whitespace, outside every quote */
+const scanValue = (t) => {
+  let q = "";
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) {
+      if (q === '"' && c === "\\") { i++; continue; }
+      if (c === q) { if (q === "'" && t[i + 1] === "'") { i++; continue; } q = ""; }
+      continue;
+    }
+    if ((c === '"' || c === "'") && opensQuote(t, i)) { q = c; continue; }
+    if (c === "#" && (i === 0 || /\s/.test(t[i - 1]))) return i;
+  }
+  return t.length;
+};
+const stripComment = (s) => {
+  const t = String(s == null ? "" : s).trim();
+  return t.slice(0, scanValue(t)).trim();
+};
+/** @param {string} t a flow sequence body, split on commas outside quotes */
+const splitFlow = (t) => {
+  const out = [];
+  let from = 0, q = "";
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) {
+      if (q === '"' && c === "\\") { i++; continue; }
+      if (c === q) { if (q === "'" && t[i + 1] === "'") { i++; continue; } q = ""; }
+    } else if ((c === '"' || c === "'") && opensQuote(t, i)) q = c;
+    else if (c === ",") { out.push(t.slice(from, i)); from = i + 1; }
+  }
+  out.push(t.slice(from));
+  return out;
+};
+const unquote = (s) => {
+  const t = stripComment(s);
+  const q = t[0];
+  if (t.length > 1 && (q === '"' || q === "'") && t[t.length - 1] === q) {
+    const inner = t.slice(1, -1);
+    return (q === '"' ? decodeDouble(inner) : decodeSingle(inner)).trim();
+  }
+  return t.replace(/^["']|["']$/g, "").trim();
+};
 
 /* -------------------------------------------------------------- link mining */
 

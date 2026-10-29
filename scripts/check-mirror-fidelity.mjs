@@ -12,7 +12,7 @@ const source = join(scratch, "source"), mirror = join(scratch, "mirror");
 const write = (path, body) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, body); };
 const config = (path, value) => write(join(source, ".obsidian", path), JSON.stringify(value));
 const fixtures = {
-  "General/Alpha.md": "---\ncreated: 2020-01-01\ntype: daily\ntags: [daily-note, project/alpha]\n---\n[Beta](Beta.md) [[Beta]] [[Elsewhere/Beta]] [[2020-02-03 Decision]]\n",
+  "General/Alpha.md": "---\ncreated: 2020-01-01\nlast modified: 2021-04-05\ntype: daily\ntags: [daily-note, project/alpha]\n---\n[Beta](Beta.md) [[Beta]] [[Elsewhere/Beta]] [[2020-02-03 Decision]]\n",
   "General/Beta.md": "---\ncreated: 2020-01-02\ntags: [project/beta]\naliases: [Alternate]\n---\n[[Undated]]\n",
   "Elsewhere/Beta.md": "---\ncreated: 2020-01-03\n---\n[[../General/Beta]] [[../Missing]]\n",
   "General/2020-02-03 Decision.md": "# Decision\n[[Beta]]\n",

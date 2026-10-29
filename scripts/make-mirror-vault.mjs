@@ -8,7 +8,7 @@ import { readSortingSpec } from "../src/sortspec-file.mjs";
 // github#176
 import { translateSortSpec } from "./mirror-sortspec.mjs";
 import { parseFrontmatter, mineLinks } from "../src/note-source.mjs";
-import { resolveCreated } from "../src/dates.mjs";
+import { createdKeyList, localDay, resolveCreated, resolveTouched } from "../src/dates.mjs";
 import { canonicalDest, isRelativeDest, resolveAgainst, ghostKey } from "../src/links.mjs";
 import { countWords, inferType, normalizeTags, under } from "../src/taxonomy.mjs";
 import { mirrorSettings } from "./mirror-settings.mjs";
@@ -102,7 +102,16 @@ const looksLikePerson = (name, parentPath) =>
 const files = walk(VAULT);
 const readConfig = (rel) => { try { return JSON.parse(readFileSync(join(VAULT, ".obsidian", rel), "utf8")); } catch { return {}; } };
 const daily = readConfig("daily-notes.json"), templates = readConfig("templates.json"), templater = readConfig("plugins/templater-obsidian/data.json");
+// github#205
+const createdKeys = createdKeyList(readConfig("plugins/vault-graph/data.json").createdKeys);
 const templateDirs = [templates.folder, templater.templates_folder].filter((p) => typeof p === "string" && p);
+// github#205
+const touchedStamp = (fm, st) => {
+  const day = resolveTouched(fm, st.mtimeMs);
+  if (day === localDay(st.mtimeMs)) return st.mtime;
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d, 12);
+};
 const notes = [];
 for (const abs of files) {
   const rel = relative(VAULT, abs).split(sep).join("/");
@@ -115,8 +124,9 @@ for (const abs of files) {
     rel,
     dir: dirname(rel) === "." ? "" : dirname(rel),
     base: basename(rel, ".md"),
-    created: resolveCreated(fm, basename(rel, ".md"), st.ctimeMs, st.mtimeMs).day,
-    mtime: st.mtime,
+    created: resolveCreated(fm, basename(rel, ".md"), st.ctimeMs, st.mtimeMs, createdKeys).day,
+    // github#205
+    mtime: touchedStamp(fm, st),
     words: countWords(body),
     tags,
     type: inferType(fm, rel, tags, daily.folder || "", (p) => templateDirs.some((d) => under(p, d))),

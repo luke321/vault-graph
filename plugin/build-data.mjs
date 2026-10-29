@@ -3,7 +3,7 @@
 // github#149 -- JSDoc obsidian types are erased, and are checked by tsc
 
 // github#6
-import { dateTally, localDay, resolveCreated } from "../src/dates.mjs";
+import { createdKeyList, dateTally, resolveCreated, resolveTouched } from "../src/dates.mjs";
 // github#141
 import { canonicalDest, ghostKey } from "../src/links.mjs";
 // github#149 -- the policy this producer shares with src/build-graph.mjs
@@ -43,7 +43,7 @@ import {
 
 /**
  * github#140 -- the only four settings buildData reads, per render
- * @typedef {{ ghosts: boolean, templates: boolean, flatMonths: boolean, words: boolean }} BuildOptions
+ * @typedef {{ ghosts: boolean, templates: boolean, flatMonths: boolean, words: boolean, createdKeys?: string }} BuildOptions
  */
 
 // github#32
@@ -166,6 +166,8 @@ export async function buildData(host, opts, version) {
   /** @type {GraphNode[]} */
   const nodes = [];
   const dates = dateTally();
+  // github#205
+  const createdKeys = createdKeyList(opts.createdKeys);
 
   for (const file of files) {
     const cache = app.metadataCache.getFileCache(file) || {};
@@ -177,7 +179,7 @@ export async function buildData(host, opts, version) {
 
     const dirs = paraDirs(file.path, opts.flatMonths);
     // github#6
-    const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime);
+    const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime, createdKeys);
     dates[dated.source]++;
     index.set(file.path, nodes.length);
     nodes.push({
@@ -189,7 +191,7 @@ export async function buildData(host, opts, version) {
       type: inferType(fm, file.path, tags, dailyDir, isTemplate),
       tags: tags,
       created: dated.day,
-      touched: localDay(file.stat.mtime),
+      touched: resolveTouched(fm, file.stat.mtime),
       words: 0,
       _file: file,
     });
