@@ -28,4 +28,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning` |
-| **Last re-recorded** | `2.10.0 — 2026-10-21` — 13.4 s at 1000x1000, encoded at 1000 px (1.10 MB) |
+| **Last re-recorded** | `2.10.1 — 2026-10-29` — 13.5 s at 1000x1000, encoded at 1000 px (1.03 MB) |
