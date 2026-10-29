@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 import { ALIAS_DIVERGENCE, DATA, DATE_SOURCES, DIVERGENCES, NODE, STATS, shapeOf, validate }
   from "../src/contract.mjs";
@@ -58,6 +59,8 @@ const NOTES = {
   "05 - Dates/Wiki.md": "---\nDate_Created: 2023-11-02 08:00\nupdated: 2024-1-9\n---\n# a datetime\n",
   "05 - Dates/Bad.md": "---\ncreated: yesterday\nupdated: 2024-13-40\n---\n# neither is a day\n",
   "05 - Dates/Spaced.md": "---\ncreated at: 2020-02-03\nLast Modified: 2021-04-05\n---\n# keys with spaces\n",
+  "05 - Dates/Quoted.md": "---\n\"created at\": 2020-02-03\n'Last Modified': \"2020/02/03\" # an old note\n---\n# quoted keys and a comment\n",
+  "05 - Dates/Accent.md": "---\nCréé: 2021-06-07\nupdated: 2021/08/09 # trailing comment\n---\n# a non-ASCII key\n",
   "05 - Dates/Custom.md":"---\nadded: 2020-05-06\n---\n# a key only the setting names\n",
 };
 
@@ -152,17 +155,8 @@ function fakeHost(vault) {
     // github#149 -- Obsidian strips the BOM before parsing frontmatter
     const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(raw).replace(/^\uFEFF/, ""));
     if (!m) return {};
-    /** @type {Record<string, unknown>} */
-    const fm = {};
-    for (const line of m[1].split(/\r?\n/)) {
-      const kv = /^([A-Za-z0-9_][A-Za-z0-9_ -]*?)\s*:\s*(.*)$/.exec(line);
-      if (!kv) continue;
-      const v = kv[2].trim();
-      fm[kv[1]] = v.startsWith("[") && v.endsWith("]")
-        ? v.slice(1, -1).split(",").map((x) => x.trim()).filter(Boolean)
-        : v;
-    }
-    return fm;
+    // github#205
+    try { const fm = parseYaml(m[1]); return fm && typeof fm === "object" ? fm : {}; } catch { return {}; }
   };
 
   const app = {
@@ -251,8 +245,8 @@ try {
   const exporterFlat = runExporter(vault, join(work, "flat.html"), ["--ghosts", "--flat-months"]);
   const pluginFlat = await runPlugin(vault, true);
   // github#205 -- the created-date setting, both ways
-  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added"]);
-  const pluginKeys = await runPlugin(vault, false, "added");
+  const exporterKeys = runExporter(vault, join(work, "keys.html"), ["--ghosts", "--created-keys", "added, Créé"]);
+  const pluginKeys = await runPlugin(vault, false, "added, Créé");
 
   console.log("check-producer-contract: each producer against the contract");
   eq(validate(exporter, "exporter"), [], "the exporter satisfies the contract");
@@ -388,6 +382,10 @@ try {
     eq(ex["05 - Dates/Slash.md"].touched, "2024-04-06", "modified feeds touched, not the file stamp");
     eq([ex["05 - Dates/Spaced.md"].created, ex["05 - Dates/Spaced.md"].touched], ["2020-02-03", "2021-04-05"],
        "a property name with spaces is read by the exporter");
+    eq([ex["05 - Dates/Quoted.md"].created, ex["05 - Dates/Quoted.md"].touched], ["2020-02-03", "2020-02-03"],
+       "a quoted key, and a quoted value with a trailing comment, decode before the date is read");
+    eq(ex["05 - Dates/Accent.md"].touched, "2021-08-09", "an unquoted slash date with a trailing comment is a day");
+    eq(keys["05 - Dates/Accent.md"].created, "2021-06-07", "a non-ASCII key the setting names is read");
     eq(ex["05 - Dates/Wiki.md"].created, "2023-11-02", "a date with a time is a day");
     eq(frontmatterDay("[[2023-11-02]]"), "2023-11-02", "a wikilinked date is a day");
     eq(frontmatterDay("2024-02-30"), "", "a day that does not exist is not one");

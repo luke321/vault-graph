@@ -17,10 +17,10 @@ export function parseFrontmatter(raw) {
       continue;
     }
     // github#205
-    const kv = /^([A-Za-z0-9_][A-Za-z0-9_ -]*?)\s*:\s*(.*)$/.exec(line);
+    const kv = KEY_LINE.exec(line);
     if (!kv) continue;
-    key = kv[1];
-    const v = kv[2].trim();
+    key = kv[1] != null ? kv[1] : kv[2] != null ? kv[2] : kv[3].trim();
+    const v = stripComment(kv[4]).trim();
     if (v === "") { fm[key] = []; continue; }
     if (v.startsWith("[") && v.endsWith("]")) {
       fm[key] = v.slice(1, -1).split(",").map(unquote).filter(Boolean);
@@ -31,7 +31,31 @@ export function parseFrontmatter(raw) {
   // github#149
   return { fm, body: noteBody(raw) };
 }
-const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
+// github#205
+const KEY_LINE = /^(?:"((?:[^"\\]|\\.)+)"|'((?:[^']|'')+)'|([^\s:#"'[\]{},&*!|>%@`-][^:#]*?|-[^\s:#][^:#]*?))\s*:(?:\s+(.*)|$)/;
+// github#205
+const stripComment = (s) => {
+  const t = String(s == null ? "" : s).trim();
+  const q = t[0];
+  if (q === '"' || q === "'") {
+    for (let i = 1; i < t.length; i++) {
+      if (q === '"' && t[i] === "\\") { i++; continue; }
+      if (t[i] === q) { if (q === "'" && t[i + 1] === "'") { i++; continue; } return t.slice(0, i + 1); }
+    }
+    return t;
+  }
+  const c = /(^|\s)#/.exec(t);
+  return c ? t.slice(0, c.index).trim() : t;
+};
+const unquote = (s) => {
+  const t = stripComment(s);
+  const q = t[0];
+  if (t.length > 1 && (q === '"' || q === "'") && t[t.length - 1] === q) {
+    const inner = t.slice(1, -1);
+    return (q === '"' ? inner.replace(/\\(["\\/])/g, "$1") : inner.replace(/''/g, "'")).trim();
+  }
+  return t.replace(/^["']|["']$/g, "").trim();
+};
 
 /* -------------------------------------------------------------- link mining */
 
