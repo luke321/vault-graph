@@ -30,6 +30,26 @@ published tag breaks every link to it.
 
 ---
 
+## 2.10.1 — 2026-10-29
+
+**Notes keep the dates you gave them, even in a copied or cloned vault.** A vault that was
+copied, synced or cloned onto a new machine could show every note as created on the day it
+arrived, because the date came from the file and the copy reset it
+([#205](https://github.com/luke321/vault-graph/issues/205)).
+
+- The created date is read from the note's own properties first. A new **Created date
+  properties** setting names which ones (default `created, date`); names match ignoring case,
+  and common spellings such as `created at` and `date created` are always tried after them.
+- Dates written as `2024-03-05T10:00`, `2024/03/05` or in quotes now read too.
+- An `updated` or `modified` property sets a note's last-touched date, instead of the file's
+  own timestamp.
+- A note with none of these falls back as before: a date at the start of its file name, then
+  the file's timestamp.
+- The standalone exporter now reads note properties the way Obsidian does — quoted names,
+  accented names, and a `#` inside quotes — so it draws the same graph the plugin does.
+
+---
+
 ## 2.10.0 — "Groundwork" — 2026-10-22
 
 **The layout engine underneath the disc was rebuilt to make room for what comes next, dots now
