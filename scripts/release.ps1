@@ -83,6 +83,46 @@ function Invoke-Native {
   if ($LASTEXITCODE -ne 0) { throw "$Exe $($Arguments -join ' ') exited $LASTEXITCODE" }
 }
 
+# WHAT THE GATES MEASURED, SO THE TAG CAN BE HELD TO IT (github#208). The tag used to go on
+# whatever HEAD was current when the last gate finished -- minutes of lint, build and suite
+# later -- and nothing asserted that it was still the commit, or the source, those gates had
+# passed. Another session committing, a `git switch` in a second terminal, an editor saving a
+# file under -AllowDirty: each leaves a tag on something no gate looked at, and a published tag
+# cannot be moved. So this records HEAD and a hash of the whole working tree -- tracked and
+# untracked files, ignored ones left out, written to a throwaway index so the real one is never
+# touched -- and Assert-SourceIdentity compares both again immediately before the tag.
+function Get-SourceIdentity {
+  $head = ([string] (Invoke-Native git @('rev-parse', '--verify', 'HEAD^{commit}') | Select-Object -First 1)).Trim()
+  $index = Join-Path ([IO.Path]::GetTempPath()) ('vg-release-index-' + [guid]::NewGuid().ToString('N'))
+  $prevIndex = $env:GIT_INDEX_FILE
+  try {
+    $env:GIT_INDEX_FILE = $index
+    Invoke-Native git @('read-tree', 'HEAD') | Out-Null
+    Invoke-Native git @('add', '--all') 2>&1 | Out-Null
+    $source = ([string] (Invoke-Native git @('write-tree') | Select-Object -First 1)).Trim()
+  } finally {
+    $env:GIT_INDEX_FILE = $prevIndex
+    Remove-Item -LiteralPath $index -Force -ErrorAction SilentlyContinue
+  }
+  [pscustomobject]@{ Head = $head; Source = $source }
+}
+
+function Assert-SourceIdentity {
+  param([Parameter(Mandatory)] $Measured)
+  $now = Get-SourceIdentity
+  if ($now.Head -ne $Measured.Head) {
+    throw ("HEAD moved while the gates ran: they measured $($Measured.Head.Substring(0,7)), HEAD is now " +
+           "$($now.Head.Substring(0,7)). A tag here would sit on a commit no gate looked at. Nothing was tagged.")
+  }
+  if ($now.Source -ne $Measured.Source) {
+    throw ("the source changed while the gates ran: HEAD is still $($now.Head.Substring(0,7)), but the " +
+           "working tree hashes to $($now.Source.Substring(0,7)), not the $($Measured.Source.Substring(0,7)) " +
+           "the gates measured. Nothing was tagged.")
+  }
+  Write-Host ("HEAD $($now.Head.Substring(0,7)) and its source ($($now.Source.Substring(0,7))) are " +
+              "the ones the gates measured") -ForegroundColor DarkGray
+}
+
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
 Push-Location $repo
@@ -144,10 +184,31 @@ try {
   # fast-forwards the LOCAL main as well, which this observed doing while the guard was
   # being written -- a check that silently moves a branch is not a check. This updates the
   # remote-tracking ref and nothing else.
+  #
+  # AND THE FETCH IS CHECKED, AND ITS RESULT VERIFIED (github#208). This was a bare `& git
+  # fetch`: in PowerShell 5.1 a native exit code is not terminating, so a fetch that failed --
+  # no network, a renamed remote, an expired credential -- printed its error and the guard
+  # below went on to compare HEAD against whatever origin/main was left over from the last
+  # fetch. "Equal to a stale ref" is the exact thing the fetch exists to rule out. So the fetch
+  # goes through Invoke-Native, origin/main has to resolve afterwards, and it has to be the
+  # commit `git ls-remote` reports for main on the remote right now -- the second network call
+  # is what makes "verified" mean the remote's answer rather than whatever the local ref holds.
   if ($branch -eq 'main') {
-    & git fetch origin 'refs/heads/main:refs/remotes/origin/main' --quiet
-    $behind = (& git rev-list --count 'HEAD..origin/main').Trim()
-    $ahead  = (& git rev-list --count 'origin/main..HEAD').Trim()
+    try { Invoke-Native git @('fetch', '--quiet', 'origin', 'refs/heads/main:refs/remotes/origin/main') }
+    catch { throw "could not fetch origin/main ($_). The equality guard cannot be measured against a ref nobody refreshed. Nothing was tagged." }
+    $originMain = (& git rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}')
+    if (-not $originMain) { throw "origin/main does not resolve after the fetch. Nothing was tagged." }
+    $originMain = ([string] $originMain).Trim()
+    $live = ''
+    try { $live = ((Invoke-Native git @('ls-remote', '--exit-code', 'origin', 'refs/heads/main')) | Select-Object -First 1) }
+    catch { throw "could not ask origin for main ($_). Nothing was tagged." }
+    $live = ([string] $live).Split("`t")[0].Trim()
+    if ($live -ne $originMain) {
+      throw ("origin/main is $($originMain.Substring(0,7)) here but origin reports $live for main. " +
+             "The fetch did not leave the ref the remote has. Nothing was tagged.")
+    }
+    $behind = (& git rev-list --count 'HEAD..refs/remotes/origin/main').Trim()
+    $ahead  = (& git rev-list --count 'refs/remotes/origin/main..HEAD').Trim()
     if ($behind -ne '0') {
       throw ("main is $behind commit(s) behind origin/main. Pull first -- tagging here " +
              "would tag a main that is missing what is already published.")
@@ -179,6 +240,9 @@ try {
     if ($at -ne $head) { throw "$Version already exists and points at $($at.Substring(0,7)), not HEAD. Bump, or delete the tag." }
     Write-Host "$Version already tags HEAD -- resuming." -ForegroundColor Yellow
   }
+
+  # github#208 -- taken here, after every guard on the tree and before the first gate.
+  $measured = Get-SourceIdentity
 
   # The CHANGELOG is the release notes. A version with no section is a version whose
   # changes nobody wrote down, which is worth stopping for.
@@ -341,6 +405,10 @@ try {
     }
   }
 
+  # github#208 -- before the -DryRun stop as well, so a rehearsal proves the same thing.
+  Write-Host "`n=== identity ===" -ForegroundColor Cyan
+  Assert-SourceIdentity -Measured $measured
+
   if ($DryRun) { Write-Host "`n-DryRun: stopping before the tag and the push." -ForegroundColor Yellow; return }
 
   Write-Host "`n=== tag ===" -ForegroundColor Cyan
@@ -353,7 +421,12 @@ try {
   # --cleanup=verbatim: git's default strips every line starting with '#' from a tag message
   # as a comment, which silently ate the '## <version>' heading and every '###' section from
   # 2.0.0, 2.1.0 and 2.2.0's tags. github#47
-  if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '--cleanup=verbatim', '-F', $msgFile) }
+  #
+  # Checked once more as the very last step before the tag, and the tag names the measured
+  # commit explicitly rather than whatever HEAD is by the time git reads it (github#208), so
+  # nothing that moves HEAD after the check can move the tag with it.
+  Assert-SourceIdentity -Measured $measured
+  if (-not $tagExists) { Invoke-Native git @('tag', '-a', '--cleanup=verbatim', '-F', $msgFile, $Version, $measured.Head) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
   # THE TAG, AND ONLY THE TAG. The workflow refuses to publish a tag that is not in
