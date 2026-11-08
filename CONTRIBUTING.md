@@ -78,8 +78,15 @@ node scripts/smoke.mjs                  # the invariant suite: five fixtures, ea
 `check-pii` reads its deny list from the untracked `.pii-names`, or from the `PII_NAMES` secret in
 CI. The list holds names, plus typed `email:`, `jira:` and `vault:` entries for the rules that
 would otherwise name the maintainer in this public source (`github#196`). Copy
-`.pii-names.example` to see the format. In CI, a list with no entry of one kind fails. Locally,
-the check warns. Either way, every loaded value is planted and has to be caught on every run.
+`.pii-names.example` to see the format. In CI, a list with no entry of one kind fails, and so does
+a trusted run with no secret at all; only a pull request from a fork, which gets no secrets, runs
+the patterns alone and says so (`github#208`). Locally, the check warns. Either way, every loaded
+value is planted and has to be caught on every run.
+
+**Every gate is a Node script, so a push to `develop` or `main` without Node is refused**
+(`github#208`). A feature-branch push needs no Node. `PRE_PUSH_ALLOW_NO_NODE=1 git push` is the
+one way past it, and it prints every check it skipped. `.nvmrc` names the Node major the
+toolchain runs on (CI reads it), and `package.json`'s `engines` says the same.
 
 **Only the last one has a skip flag.** `SKIP_SMOKE=1 git push` skips the suite; the sixteen
 above it do not have one and are not meant to — most of them are cheap, and what they prevent
@@ -282,8 +289,9 @@ checked-out commit, on a pull request into `develop` or `main` and on a push to 
 two lists are kept in step by `node scripts/check-ci-parity.mjs`, which the hook and the
 workflow both run: a gate added to one and not the other fails the push. The suite stays out
 of CI (no headless path, and a frame-sensitive lane tuned against one machine's Chrome), and
-`check-pii.mjs` reads the `PII_NAMES` secret there — read that step's output, not its exit
-code: `NO NAME LIST` means the secret did not load. `.ai-context/invariants.md` ("The merge boundary runs the gates the
+`check-pii.mjs` reads the `PII_NAMES` secret there. A trusted run with no secret fails the step
+(`github#208`); a pull request from a fork, which gets no secrets, runs the patterns only and
+says `patterns only` in a warning and the run summary. `.ai-context/invariants.md` ("The merge boundary runs the gates the
 hook runs") has the measurements and github#147 the reasoning.
 
 **A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured

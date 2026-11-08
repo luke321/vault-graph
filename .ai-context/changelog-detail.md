@@ -1,4 +1,35 @@
-﻿﻿## 2026-10-27 — the created date follows the property the vault uses (`github#205`)
+﻿﻿## 2026-11-08 — the release, the hook and CI's PII step fail closed (`github#208`)
+
+The 2026-11-07 tooling audit read five places that could report success without having checked.
+Each fix was proved by running the failure it closes, in throwaway repositories only: a bare
+repository standing in for origin, a clone of it on `main`, the gate scripts stubbed so no suite
+and no Chrome ran. The pre-change file ran beside the new one in every case.
+
+| Case | before | after |
+|---|---|---|
+| `release.ps1 -DryRun`, origin unreachable | exit 0, dry run completes against the stale `origin/main` | exit 1, `could not fetch origin/main (... exited 128)`, no tag |
+| `release.ps1`, a commit lands while the gates run | exit 0, tag written on the moved commit (`b5b6bf0`, not the measured `bc476df`) and pushed | exit 1, `HEAD moved while the gates ran`, no tag; the same with `-DryRun` |
+| `release.ps1`, a tracked file edited while the gates run | exit 0, tagged and pushed | exit 1, `the source changed while the gates ran`, no tag |
+| `release.ps1`, nothing moves | tagged | tagged on the measured commit; the identity line prints before the `-DryRun` stop too |
+| pre-push, develop push, no Node on PATH | exit 0, `node not found, skipping every check` | exit 1, `node is not on PATH -- push blocked` |
+| pre-push, main push not descended from develop, no Node | exit 0 (the git-only policy never ran) | exit 1, the main-ancestry refusal |
+| pre-push, feature branch, no Node | exit 0 | exit 0, unchanged |
+| pre-push, develop push, no Node, `PRE_PUSH_ALLOW_NO_NODE=1` | n/a | exit 0, lists every check it skipped |
+| `quality.yml` PII step, trusted run, no secret | exit 0, `NO NAME LIST` | exit 1, `PII_NAMES repository secret is not set` |
+| `quality.yml` PII step, fork pull request, no secret | exit 0, `NO NAME LIST` | exit 0, a `patterns only` warning and run-summary line |
+| `release.yml` PII step, no secret | exit 0, `NO NAME LIST` | exit 1 |
+| either step, a synthetic secret with every kind | n/a | exit 0, `1 names, rules 1 email, 1 jira, 1 vault, 7 patterns, 8 negative controls caught` |
+
+The workflow steps ran from their own `run:` text, pulled out of each file and executed under bash
+in a clone with no `.pii-names`. The source hash is a tree of the whole working tree written
+through a throwaway index; computing it took 597 ms here, and running the real lint, notice,
+comment and build gates between two readings left it unchanged. `check-ci-parity` still counts
+17 of 17 with the PII step now a `run: |` block, and fails when the command leaves that block.
+It also takes the sister repo's three parser fixes (CRLF, the `- run:` form, comment lines in a
+block). Node is pinned once: `.nvmrc` holds `24`, the major CI already used, `engines.node` is
+`24.x`, and `quality.yml`, `release.yml` and `close-issues.yml` read `node-version-file`.
+`npm run lint` 0, `check-comments` at its baseline of 350.
+
 
 A cloned or copied vault resets every file stamp, so a note with no `created` or `date`
 property fell to the stamp and the whole timeline read as the day the vault arrived. The

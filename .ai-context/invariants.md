@@ -5968,10 +5968,14 @@ as more than it is.** `scripts/smoke.mjs` is not in CI: it has no headless path 
 Chrome with `--app=`, `--window-position` and `--window-size` and takes a lock named after a
 monitor — and its frame-sensitive lane (446 s of the hook's measured 587 s) was tuned against
 one machine's Chrome, so a required status built on it would flake, and a required status that
-flakes is one that gets bypassed. And `check-pii.mjs` is **patterns-only on a runner**:
-`.pii-names` is gitignored on purpose, so a fresh checkout has no name list, the check prints
-`NO NAME LIST`, tests its five patterns and exits 0. CI proves the patterns; the twelve names
-are proved by the hook on a configured checkout. Read the step's output, not its exit code.
+flakes is one that gets bypassed. And `check-pii.mjs` **needs its name list fed in on a
+runner**: `.pii-names` is gitignored on purpose, so a fresh checkout has none, and the script
+alone would print `NO NAME LIST`, test its generic patterns and exit 0. Since github#196 the list
+arrives as the `PII_NAMES` secret, and since github#208 the step refuses a trusted run where the
+secret is unset, so a green PII step on a push, a same-repo pull request or a release means the
+names were checked. The one run that stays green without them is a pull request from a fork,
+which GitHub gives no secrets: it checks the patterns, says `patterns only` as a warning and in
+the run summary, and the names are checked when the merge reaches `develop`.
 
 **Creating the workflow does not require the status.** The `quality gates` context has to be
 added to `main`'s ruleset alongside `main only accepts develop`, which is a repository
@@ -7351,8 +7355,10 @@ documents the format with placeholder values.
 **A list that is loaded but lacks a kind fails in CI and warns locally.** `PII_NAMES` without an
 `email:`, `jira:` or `vault:` entry exits 1, so a secret that was never updated cannot run half
 the rules and pass. A local `.pii-names` without one prints a warning naming the missing kind and
-exits 0. With no list at all nothing has changed: the generic patterns run and the `NO NAME LIST`
-warning prints.
+exits 0. With no list at all the script itself has not changed: the generic patterns run and the
+`NO NAME LIST` warning prints. What changed is the workflows around it (github#208): a trusted CI
+run with no `PII_NAMES` secret fails the step before the script runs, and only a fork's pull
+request runs patterns-only, saying so.
 
 **Negative controls run on every invocation.** Each generic pattern gets one. Each loaded name,
 domain, key and vault gets a synthetic line, and that line has to be flagged **by the rule it was

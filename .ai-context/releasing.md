@@ -70,18 +70,23 @@ prefix, so a `v`-tagged release is one nobody can install), a version the manife
 claim, a version with no `## <version>` section in `CHANGELOG.md`, a branch other than `main`
 (github#47), a dirty tree and a `main` that is not exactly `origin/main` (github#94: behind
 means missing what is already published, ahead means a local merge the ruleset will never let
-through); prints the hero and feature-clip warnings; runs lint, `check-notice.mjs`,
-`check-comments.mjs` (github#137) and the invariant suite; builds the plugin once as a pre-flight
-(the one failure the split introduces
+through), measured against an `origin/main` it has just fetched through a checked call and
+compared with what `git ls-remote` reports, so a failed fetch stops the release instead of
+comparing a stale ref (github#208); prints the hero and feature-clip warnings; runs lint,
+`check-notice.mjs`, `check-comments.mjs` (github#137) and the invariant suite; builds the plugin
+once as a pre-flight (the one failure the split introduces
 is a build that only fails in CI, leaving a tag with no release, and a tag cannot be re-cut);
-then writes the annotated tag with the CHANGELOG section as its message and pushes the tag.
+re-checks that `HEAD` and a hash of the whole working tree are still the ones recorded before
+the first gate, so nothing that moved while the gates ran gets tagged (github#208); then writes
+the annotated tag on that measured commit with the CHANGELOG section as its message and pushes
+the tag.
 **It never pushes `main`.** The `develop → main` merge happens before the script runs —
 either on the website, or as a local merge pushed directly now that the ruleset no longer
 requires a pull request (dropped 2026-09-13; it still requires `branch-policy.yml`'s
 source-branch check to pass, whichever way the commit arrives). The first cut of 2.4.0 made
 its tag and then had `git push origin HEAD` come back with GH013 — back when the ruleset
 still refused a direct push outright — which is the dangling-tag case this file warns about.
-`-DryRun` stops after the suite.
+`-DryRun` stops after the suite and the identity check.
 
 **`.github/workflows/release.yml` is the publisher (github#10).** The tag push triggers it. It
 checks out the tagged commit, resolves and re-checks the version against the manifest and the
@@ -488,8 +493,8 @@ exactly once.
 6. `git switch main && git pull --ff-only`, then `.\scripts\release.ps1 <version>`. It checks
    that `main` is exactly `origin/main` (github#94: a `main` that is ahead is a local merge
    nobody has pushed yet, and the script stops before any tag exists), finds the stamp for
-   `HEAD`'s tree and skips the suite, tags, and pushes the tag (never gated). The workflow
-   publishes.
+   `HEAD`'s tree and skips the suite, re-checks that `HEAD` and its source are what the gates
+   measured (github#208), tags, and pushes the tag (never gated). The workflow publishes.
 
 `node scripts/suite-stamp.mjs check` says what step 4 or 6 will do before you push, and
 `node scripts/suite-stamp.mjs list` shows every tree this machine has passed.
