@@ -8,7 +8,7 @@ and no Chrome ran. The pre-change file ran beside the new one in every case.
 | Case | before | after |
 |---|---|---|
 | `release.ps1 -DryRun`, origin unreachable | exit 0, dry run completes against the stale `origin/main` | exit 1, `could not fetch origin/main (... exited 128)`, no tag |
-| `release.ps1`, a commit lands while the gates run | exit 0, tag written on the moved commit (`b5b6bf0`, not the measured `bc476df`) and pushed | exit 1, `HEAD moved while the gates ran`, no tag; the same with `-DryRun` |
+| `release.ps1`, a commit lands while the gates run | exit 0, tag written on the moved commit (`269e88c`, not the measured `b520194`) and pushed | exit 1, `HEAD moved while the gates ran`, no tag; the same with `-DryRun` |
 | `release.ps1`, a tracked file edited while the gates run | exit 0, tagged and pushed | exit 1, `the source changed while the gates ran`, no tag |
 | `release.ps1`, nothing moves | tagged | tagged on the measured commit; the identity line prints before the `-DryRun` stop too |
 | pre-push, develop push, no Node on PATH | exit 0, `node not found, skipping every check` | exit 1, `node is not on PATH -- push blocked` |
