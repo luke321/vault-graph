@@ -56,7 +56,7 @@ function key(cmd) {
  * @returns {string[]}
  */
 function hookGates(hook) {
-  const lines = hook.split("\n");
+  const lines = hook.split(/\r?\n/);
   const from = lines.findIndex((l) => l.includes(BLOCK_START));
   const to = lines.findIndex((l) => l.includes(BLOCK_END));
   if (from < 0 || to < 0 || to <= from) {
@@ -98,17 +98,19 @@ function workflowRuns(workflow) {
   const found = [];
   // github#147 -- only a run:, never a comment naming a script in prose
   let block = -1;
+  /** @param {string} cmd */
   const take = (cmd) => {
+    if (/^\s*#/.test(cmd)) return;
     const k = key(cmd);
     if (k && !found.includes(k)) found.push(k);
   };
-  for (const line of workflow.split("\n")) {
+  for (const line of workflow.split(/\r?\n/)) {
     const indent = /^\s*/.exec(line)[0].length;
     if (block >= 0) {
       if (line.trim() && indent <= block) block = -1;
       else { take(line); continue; }
     }
-    const run = /^\s*run:\s*(.*?)\s*$/.exec(line);
+    const run = /^\s*(?:-\s+)?run:\s*(.*?)\s*$/.exec(line);
     if (!run) continue;
     if (/^[|>][-+]?\d*$/.test(run[1])) block = indent;
     else take(run[1]);
