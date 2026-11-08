@@ -28,13 +28,11 @@
 #
 #   SKIP_SMOKE=1 git push
 #
+# No Node at all is not one of those reasons: a develop/main push without it is refused, and
+# PRE_PUSH_ALLOW_NO_NODE=1 is the explicit, loud way past that (github#208).
+#
 # There is no --no-verify advice here on purpose: that also disables every other hook,
 # silently, and is the habit that makes hooks worthless.
-
-if ! command -v node >/dev/null 2>&1; then
-  echo "pre-push: node not found, skipping every check" >&2
-  exit 0
-fi
 
 root=$(git rev-parse --show-toplevel)
 
@@ -119,6 +117,39 @@ fi
 if [ -z "$gated_push" ]; then
   echo "pre-push: not pushing to develop or main -- skipping the gate checks"
   exit 0
+fi
+
+# NODE IS REQUIRED FROM HERE ON, AND ITS ABSENCE BLOCKS THE PUSH (github#208). This check used
+# to sit at the very top and exit 0 -- "node not found, skipping every check" -- so a machine
+# without Node pushed to develop or main past every gate below, the unskippable ones included,
+# and past the main-ancestry policy above as well, which needs nothing but git. It now runs
+# after both: a feature-branch push needs no Node and still goes through, the policy always
+# runs, and a gated push with no Node fails closed. The one way past it is deliberate and
+# named, and it says what it skipped.
+if ! command -v node >/dev/null 2>&1; then
+  if [ -n "$PRE_PUSH_ALLOW_NO_NODE" ]; then
+    cat >&2 <<'EOF'
+pre-push: node is not on PATH and PRE_PUSH_ALLOW_NO_NODE is set -- pushing WITHOUT the gates.
+
+NOT CHECKED on this push: names and identifiers (PII), scope, network, the licence notice,
+comments, determinism, the selftests, the generated files, CI parity, lint, and the
+invariant suite. The main-ancestry policy above did run. Push again from a machine with
+Node before anyone relies on this commit.
+EOF
+    exit 0
+  fi
+  cat >&2 <<'EOF'
+
+pre-push: node is not on PATH -- push blocked.
+
+Every gate on a push to develop or main is a Node script, the PII check among them, and a
+push that runs none of them is a push nothing checked. Install Node (the major in .nvmrc)
+or put it on PATH, then push again.
+
+If you genuinely mean to push unchecked, say so for this one push:
+  PRE_PUSH_ALLOW_NO_NODE=1 git push
+EOF
+  exit 1
 fi
 
 # THE PII CHECK RUNS FIRST ON A GATED PUSH, AND HAS NO SKIP.
