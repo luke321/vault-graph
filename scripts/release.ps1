@@ -405,7 +405,9 @@ try {
     }
   }
 
-  # github#208 -- before the -DryRun stop as well, so a rehearsal proves the same thing.
+  # github#208 -- the last check before the tag, ahead of the -DryRun stop so a rehearsal proves
+  # the same thing, and ahead of the message file so a refusal leaves nothing behind. The tag
+  # below names $measured.Head explicitly, so nothing that moves HEAD after this can move it.
   Write-Host "`n=== identity ===" -ForegroundColor Cyan
   Assert-SourceIdentity -Measured $measured
 
@@ -421,11 +423,6 @@ try {
   # --cleanup=verbatim: git's default strips every line starting with '#' from a tag message
   # as a comment, which silently ate the '## <version>' heading and every '###' section from
   # 2.0.0, 2.1.0 and 2.2.0's tags. github#47
-  #
-  # Checked once more as the very last step before the tag, and the tag names the measured
-  # commit explicitly rather than whatever HEAD is by the time git reads it (github#208), so
-  # nothing that moves HEAD after the check can move the tag with it.
-  Assert-SourceIdentity -Measured $measured
   if (-not $tagExists) { Invoke-Native git @('tag', '-a', '--cleanup=verbatim', '-F', $msgFile, $Version, $measured.Head) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
