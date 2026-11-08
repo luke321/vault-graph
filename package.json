@@ -2,6 +2,9 @@
   "name": "vault-graph",
   "version": "0.0.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "description": "Build tooling for the Vault Graph Obsidian plugin and its HTML exporter. Both bundle the TypeScript engine under src/engine with esbuild; the exporter needs nothing else here.",
   "scripts": {
     "build": "node scripts/code-map.mjs && node scripts/build-plugin.mjs",

@@ -39,11 +39,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The same major release.yml builds on. The script has no dependencies, so no `npm ci`.
+      # The same major release.yml builds on, from the same .nvmrc (github#208). The script has
+      # no dependencies, so no `npm ci`.
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
 
       # A zero or rewritten `before` -- develop created from nothing, or force-pushed -- fails
       # this step and closes nothing; the SHAs are in the log for whoever looks.

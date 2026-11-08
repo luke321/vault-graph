@@ -84,7 +84,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          # github#208 -- the one pin, shared with package.json's engines
+          node-version-file: .nvmrc
           cache: npm
 
       # `npm ci` installs exactly package-lock.json. The lint gate needs eslint and typescript,
@@ -98,15 +99,40 @@ jobs:
       - name: The hook's static gates all run here
         run: node scripts/check-ci-parity.mjs
 
-      # The deny list is the PII_NAMES repository secret (github#196): names plus the typed
-      # email:, jira: and vault: entries, comma-separated on one line. Read the step's output, not
-      # its exit code: `N names, rules ...` is the list having loaded, `NO NAME LIST` is not (a
-      # fork's run has no secret, so it checks the generic patterns only). A secret missing a kind
-      # fails the step.
+      # THE NAME LIST COMES FROM THE PII_NAMES SECRET (github#196): names plus the typed email:,
+      # jira: and vault: entries, comma-separated on one line. .pii-names is gitignored on
+      # purpose, so a runner has none; fed nothing, check-pii.mjs checks its built-in patterns
+      # only and exits 0, which on a PUBLIC repo about other people is a green step that checked
+      # no name. So an unset secret is refused here, as in release.yml (github#208, ported from
+      # the sister repo's quality.yml) -- and check-pii.mjs itself refuses a secret that is
+      # missing any of the email:, jira: or vault: kinds.
+      #
+      # THE ONE EXCEPTION IS A PULL REQUEST FROM A FORK. GitHub gives such a run no secrets at
+      # all, and refusing would put a red status on every outside contribution that its author
+      # can never fix. There the step runs the patterns only, says so as a warning and in the
+      # run summary, and stays green. The names are checked when the merge reaches develop: by
+      # the maintainer's own hook on that push, and by this workflow's push run, which has the
+      # secret. pull_request_target would hand the secret to code from the fork, and is exactly
+      # the thing not to reach for here.
       - name: No other people's names or identifiers
         env:
           PII_NAMES: ${{ secrets.PII_NAMES }}
-        run: node scripts/check-pii.mjs
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PII_NAMES:-}" ]; then
+            if [ "$FORK_PR" = "true" ]; then
+              echo "::warning::pull request from a fork: no secrets reach this run, so NO NAMES were checked -- patterns only. The push to develop checks the names."
+              echo "**PII: patterns only.** A pull request from a fork gets no secrets, so the \`PII_NAMES\` name list was not checked. The push to \`develop\` checks it." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::PII_NAMES repository secret is not set -- check-pii.mjs would silently"
+              echo "::error::degrade to patterns-only and exit 0 on a PUBLIC repo. Create it under"
+              echo "::error::Settings -> Secrets and variables -> Actions, as a COMMA-separated list"
+              echo "::error::of names plus the typed email:, jira: and vault: entries .pii-names.example documents."
+              exit 1
+            fi
+          fi
+          node scripts/check-pii.mjs
 
       - name: The page cannot style, or be styled by, its host
         run: node scripts/check-scope.mjs

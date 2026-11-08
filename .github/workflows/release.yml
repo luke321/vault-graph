@@ -109,8 +109,9 @@ jobs:
         uses: actions/setup-node@v7
         with:
           # The major the releases are cut on locally, so a local build of the same tag can be
-          # diffed against this one byte for byte.
-          node-version: '24'
+          # diffed against this one byte for byte -- read from the tagged commit's .nvmrc, the
+          # same pin package.json's engines states (github#208).
+          node-version-file: .nvmrc
           cache: npm
 
       # `npm ci` installs exactly package-lock.json; an attestation is a claim about bytes.
@@ -215,10 +216,26 @@ jobs:
         run: npm run lint --silent
       - name: The page cannot style, or be styled by, its host
         run: node scripts/check-scope.mjs
+      # This runner has no .pii-names -- it is gitignored on purpose -- so the name half of
+      # check-pii.mjs only runs here if PII_NAMES is fed in. Left unfed, the script degrades to
+      # patterns-only, prints a warning nobody reads in a CI log and exits 0: a green step that
+      # checked no name, on a PUBLIC repo, about other people. A tag push or a dispatch is always
+      # a trusted run, so there is no fork case here -- an unset secret is refused (github#208,
+      # as the sister repo's release.yml already does).
       - name: No other people's names or identifiers
         env:
           PII_NAMES: ${{ secrets.PII_NAMES }}
-        run: node scripts/check-pii.mjs
+        run: |
+          set -euo pipefail
+          if [ -z "${PII_NAMES:-}" ]; then
+            echo "::error::PII_NAMES repository secret is not set -- check-pii.mjs would silently"
+            echo "::error::degrade to patterns-only and exit 0 on a PUBLIC repo, about other people's"
+            echo "::error::names. Create it under Settings -> Secrets and variables -> Actions, as a"
+            echo "::error::COMMA-separated list of names plus the typed email:, jira: and vault: entries"
+            echo "::error::.pii-names.example documents."
+            exit 1
+          fi
+          node scripts/check-pii.mjs
       - name: Comments are pointers
         run: node scripts/check-comments.mjs
       - name: The vault generators are day-independent
